@@ -1,0 +1,65 @@
+# Only authored sources belong in this repository.
+/.venv/
+/.tools/
+/build/
+/dist/
+.local/
+# Development notes are private, never part of the distributed project.
+/MODLOG.md
+*.egg-info/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+*.exe
+*.dll
+*.pdb
+*.obj
+*.lib
+*.zip
+*.chl
+*.raw
+*.l3d
+*.gdb
+*.gbw
+*.sav
+*.sqlite*
+*.dmp
+*.log
+# Private runtime memory, including when explicitly stored inside the checkout.
+creature-memory.json
+dummy-memory.json
+token-usage.json
+usage.*.tmp
+.creature-memory-*.tmp
+# Personal settings, credentials, captures and local research/recovery artifacts.
+.vscode/
+.idea/
+config.local.*
+settings.local.*
+*.local.json
+/config.json
+/config.toml
+# Default private override in the project root; bundled defaults remain tracked.
+/settings.json
+/credentials.json
+/secrets.*
+*.reg
+*.lnk
+*.user
+*.suo
+*.pid
+*.out
+*.err
+*.jsonl
+*.bundle
+*.pem
+*.key
+# Game profiles and creature/save data, even if accidentally copied here.
+Profiles/
+Saved Games/
+CreatureMind/
+*.lhp
+*.erc
+*.tmpvor

@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Creature memory & context debugger</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#111820;color:#e1eaf3}body{max-width:1120px;margin:32px auto;padding:0 20px}h1{font-size:26px}h2{font-size:18px}p{line-height:1.5}section,details{background:#1c2733;padding:18px;border-radius:10px;margin:16px 0}label{display:inline-block;margin:8px 18px 8px 0}input,select,button{font:inherit;padding:8px;border-radius:5px;border:1px solid #607080}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}#question{flex:1;min-width:140px}form{display:flex;gap:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:460px;overflow:auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.badge{color:#ffd78e;font-weight:700}#error{color:#ffa898}#chat p{white-space:pre-wrap;border-bottom:1px solid #405060;padding-bottom:12px}#speech{font-size:20px}small{color:#a8bbce}@media(max-width:700px){.grid{display:block}}
+.reply-dots span{animation:reply-dot 1.5s infinite}.reply-dots span:nth-child(2){animation-delay:.25s}.reply-dots span:nth-child(3){animation-delay:.5s}@keyframes reply-dot{0%,80%,100%{opacity:.25}40%{opacity:1}}@media(prefers-reduced-motion:reduce){.reply-dots span{animation:none}}
+</style>
+<h1><span id="chat-title">Chat with creature</span> <span class="badge" id="mode">Live dummy</span></h1>
+<p id="description">Connecting to the creature chat service…</p>
+<section>
+<label><input type="checkbox" id="automatic" disabled> Automatic creature thinking</label>
+<button id="force-tick" type="button" disabled>Force tick</button><small id="force-tick-status" role="status"></small>
+<label id="delay-label">Reply delay <select id="delay"><option value="0">None</option><option value="1">1 second</option><option value="3">3 seconds</option><option value="10">10 seconds</option></select></label>
+<p id="status" aria-live="polite">Connecting…</p><p id="error" role="alert"></p>
+<p id="token-stats" hidden></p>
+<small>Preview uses the fresh selected creature and known scene locks. Full story-control coverage remains unverified; the engine action gate is unchanged. If pause or temple mode hides creature identity, chat is unavailable until it can be read again.</small>
+</section>
+<details open><summary>LLM usage statistics</summary><button id="reset-statistics" type="button" disabled>Reset model statistics</button>
+<small>Clears session and saved token totals. Keeps memory, history and the message-cap counter.</small>
+<p id="statistics-status" role="status"></p><pre id="usage-json"></pre></details>
+<details><summary>Effective settings (credentials excluded)</summary><pre id="settings-json"></pre><small>These are the settings loaded by this server, including current cadence and editable prompt sections. Restart after editing provider or prompt settings.</small></details>
+<details open><summary>Error diagnostics</summary><p id="error-summary"></p><pre id="error-details"></pre><small>Recent runtime and provider errors, including recovered tool errors. Each log retains up to 100 entries for this run; repeating conditions are grouped. Stack frames omit absolute paths, source text, exception messages and local variables. No credentials or raw provider response bodies are recorded.</small></details>
+<div class="grid" id="creature-debug">
+<section id="memory-panel"><h2>Creature memory</h2><pre id="memory"></pre><p id="memory-status"></p>
+<button id="reset-memory" type="button" disabled>Reset memory</button>
+<small>Clears saved memory only. Recent exchanges remain and can remind the creature of earlier information.</small></section>
+<section id="context-panel"><h2>Current model-formatted snapshot</h2><pre id="context"></pre>
+<small>Uses the same field names and condition meters as model input. This is a live preview, not a sent request. Open “Last request” below for the exact messages sent, including history and capabilities. Raw engine fields remain in Full debug JSON.</small></section>
+</div>
+<section><h2>Conversation history</h2><p id="history-status"></p><button id="reset-history" type="button" disabled>Reset history</button>
+<small>Clears retained exchanges, displayed chat and speech. Saved memory stays. Reset both for a fresh conversation.</small>
+<p id="reset-status" role="status"></p><details><summary>Saved exchanges (raw diagnostic format)</summary><pre id="history-json"></pre><small>These stored records are converted to model format when sent. See Last request for the actual messages.</small></details></section>
+<details><summary>Creature thinking intervals</summary>
+<p>Intervals in seconds. Quiet scenes slow down; important events can update sooner. Unchanged or empty context sends nothing.</p>
+<div id="cadence-settings">
+<label>Active <input id="active_seconds" type="number" min="5" max="3600" step="1"></label>
+<label>Near people or homes <input id="settlement_seconds" type="number" min="5" max="3600" step="1"></label>
+<label>Quiet <input id="quiet_seconds" type="number" min="5" max="3600" step="1"></label>
+<label>Distant or idle <input id="distant_seconds" type="number" min="5" max="3600" step="1"></label>
+<label>Timing variation % <input id="jitter_percent" type="number" min="0" max="50" step="1"></label>
+<button id="save-cadence" type="button">Save timing</button></div>
+<p id="cadence-status"></p><small>Distant/idle needs verified hand distance, camera zoom and idle sensors; unavailable readings are not guessed.</small>
+<p id="settings-help"></p>
+</details>
+<section><h2>Talk to your creature</h2>
+<p id="chat-help">Ask your creature what it notices, or teach it a preference to remember.</p>
+<form id="form"><input id="question" aria-label="Message to your creature" placeholder="Type a message to your creature…" maxlength="2000" required><button id="send" disabled>Send</button></form>
+<p id="availability"></p><p id="thinking" class="reply-dots" role="status" aria-label="Reply pending" hidden><span aria-hidden="true">.</span><span aria-hidden="true">.</span><span aria-hidden="true">.</span></p><div id="chat"></div></section>
+<section><h2>Speech</h2><p id="speech"></p><small>New speech replaces this text; it expires after 15 seconds.</small></section>
+<section><h2>Latest decision</h2><pre id="decision"></pre><small id="action-help">A null candidate leaves native creature behavior running.</small></section>
+
+<details><summary>Last request: system, memory, conversation and snapshot</summary><pre id="request"></pre></details>
+<details><summary>Last turn's tool lookups</summary><pre id="tools"></pre></details>
+<details><summary>Full debug JSON, including original engine-control checks</summary><pre id="full"></pre></details>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),pretty=value=>JSON.stringify(value,null,2);
+let sending=false,resetting=false,ticking=false,unavailable=true,polling=false,pollAgain=false,historySignature='';
+const debugPanels={settings:'settings-json',history:'history-json',request:'request',tools:'tools',full:'full'};
+function setJSON(id,value){const node=$(id),details=node.closest('details');if(details&&!details.open)return;if(value===undefined)return;const text=pretty(value);if(node.textContent!==text)node.textContent=text;}
+function debugPath(){const sections=Object.entries(debugPanels).filter(([,id])=>$(id).closest('details').open).map(([section])=>section);return 'debug-state?sections='+encodeURIComponent(sections.join(','));}
+const cadenceKeys=['active_seconds','settlement_seconds','quiet_seconds','distant_seconds','jitter_percent'];
+let cadenceLoaded=false,cadenceDirty=false;
+async function api(path,body){const response=await fetch(path,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!response.ok)throw Error(response.status===400?'Message unavailable. The creature may be absent, hidden by a scene lock, or the observation stale.':`Request failed (${response.status}); retry after the current observation updates.`);return response.json();}
+function render(data){const frame=data.current,d=data.runtime;if(!frame||!d)return;
+  const llm=d.mode==='live_llm_chat',provider=d.provider;
+  setJSON('usage-json',provider?{messages:provider.messages,message_limit:provider.message_limit??"unlimited",messages_remaining:provider.messages_remaining??"unlimited",api_calls:provider.requests,prompt_caching:provider.prompt_caching,last_turn:provider.last_usage,...provider.token_usage}:{});
+  setJSON('settings-json',d.settings);
+  $('force-tick').disabled=ticking||sending||resetting||Boolean(frame.force_tick_unavailable);
+  $('force-tick').title=frame.force_tick_unavailable||'Send fresh status now without enabling automatic creature thinking';
+  $('chat-title').textContent='Chat with '+(frame.character_names?.creature_name?.trim()||'creature');
+  const tokens=provider?.token_usage;
+  $('reset-statistics').disabled=resetting||sending||!frame.reset_available||!tokens;
+  $('token-stats').hidden=!tokens;
+  if(tokens){
+    const number=n=>n.toLocaleString(), describe=c=>`${number(c.input_tokens)} input (${c.responses_with_cache_read_usage?number(c.cached_input_tokens)+' reused from cache':'cache reads unreported'}; ${c.responses_with_cache_write_usage?number(c.cache_write_input_tokens)+' cache writes':'cache writes unreported'}) / ${number(c.output_tokens)} output (includes ${c.responses_with_reasoning_usage?number(c.reasoning_tokens)+' reported thinking tokens':'thinking usage unavailable'})`;
+    const s=tokens.session,t=tokens.total;
+    $('token-stats').textContent=`This session: ${describe(s)} · Saved totals: ${describe(t)} · Requests with unknown or partial usage: ${number(t.requests_with_unknown_usage)}; unknown thinking usage: ${number(t.requests_with_unknown_reasoning_usage??t.requests)}; unknown cache reads: ${number(t.requests_with_unknown_cache_read_usage??t.requests)}. Cache reads and writes are subsets of input; thinking is part of output. None are added again. Non-reasoning output can include tool calls and formatting, not just spoken text. Includes all tool rounds; not a billing estimate.`+(tokens.storage_error?' Totals could not be loaded or saved.':'')+(provider?.prompt_caching?' '+provider.prompt_caching.description:'');
+  }
+  $('mode').textContent=llm?'LLM connected':'Live dummy';
+  $('description').textContent=llm?'Your configured model receives chat messages and scheduled creature observations. Native creature AI still controls physical actions.':d.engine_execution_enabled?'Experimental dummy chat: one guarded action per game launch, from a direct question only. No external model calls.':'Real game observations with a deterministic responder. No external model calls or game actions.';
+  $('action-help').textContent=d.engine_execution_enabled?'Try come to me or look confused when a native offer is available. Queued means requested, not completed.':'No engine actions are offered. A null candidate leaves native creature behavior running.';
+  $('chat-help').textContent=llm?'Ask your creature what it notices, or teach it a preference to remember. Enable automatic creature thinking when ready.':'Try status, remember: be gentle with villagers, memory, or say: Hello! Ordinary questions get a dummy echo. remember: replaces memory; forget clears memory.';
+  $('automatic').disabled=false;$('automatic').checked=d.automatic;$('delay-label').hidden=llm;$('delay').value=String(d.delay_seconds);
+  if(d.cadence&&(!cadenceLoaded||!cadenceDirty)){for(const key of cadenceKeys)$(key).value=d.cadence[key];cadenceLoaded=true;}
+  const timing=frame.status_updates||{};
+  $('cadence-status').textContent=`Current timing: ${timing.tier||'suspended'} · ${timing.state||'waiting'}${timing.next_update_in_seconds==null?'':' · next check in '+Math.ceil(timing.next_update_in_seconds)+'s'}`;
+  $('settings-help').textContent=d.settings_scope==='shared_file'?'Timing saves to your shared settings file. Edit model/provider, lookup limits and the prompts section there; restart chat to apply those edits. The API key stays in its named environment variable.':'Timing saves privately for this service. Use init-settings and start chat with that config to share timing, provider limits and editable prompts.';
+  setJSON('tools',{trace:provider?.tool_trace||[],offered_tools:provider?.offered_tools||[]});
+  const errors=[...(d.errors||[]).map(e=>({source:'runtime',...e})),...(provider?.errors||[]).map(e=>({source:'provider',...e}))].sort((a,b)=>b.last_seen-a.last_seen);
+  $('error-summary').textContent=errors.length?`${errors.length} retained error entries · latest: ${errors[0].code} (${errors[0].stage})`:'No recorded errors.';
+  setJSON('error-details',{errors,latest_tool_error:provider?.tool_error||null,provider_cooldown_seconds:provider?.retry_after_seconds||0,action_dispatch:d.action_dispatch,pending_action:d.pending_action,wake_dispatch:d.wake_dispatch});
+  $('status').textContent=`Automatic creature thinking: ${d.automatic?(frame.gate.allowed?'enabled':'blocked: '+frame.gate.reasons.join(', ')):'disabled'} · Messages: ${llm?provider?.messages:d.dummy_requests} · API calls: ${d.external_model_calls} · Active: ${d.active_requests} · Queued questions: ${d.pending_questions} · Pending tick: ${d.pending_tick?'yes':'no'} · Merged ticks: ${d.merged_ticks} · Game actions: ${d.game_actions??"unknown"}`+(provider?` · Message cap: ${provider.message_limit??"unlimited"} · Remaining messages: ${provider.messages_remaining??"unlimited"} · Provider: ${provider.last_error||'ready'}${provider.retry_after_seconds?' (cooldown '+provider.retry_after_seconds+'s)':''}`:'');
+  unavailable=Boolean(frame.question_unavailable);$('send').disabled=sending||unavailable;$('question').disabled=sending||unavailable;
+  $('thinking').hidden=unavailable||frame.answer_status?.thinking!==true;
+  $('availability').textContent=unavailable?'Chat unavailable: '+frame.question_unavailable:'Messages send immediately, including when automatic creature thinking is disabled.';
+  $('reset-memory').disabled=resetting||sending||!frame.reset_available;
+  $('reset-history').disabled=resetting||sending||!frame.reset_available;
+  $('memory-status').textContent=(frame.memory.persistence==='local_file'?'Saved locally across restarts.':'Session memory only.')+(frame.memory.storage_error?' Storage error: '+frame.memory.storage_error:'');
+  $('history-status').textContent=`${frame.memory.recent_pair_count??frame.memory.recent_pairs?.length??0} retained exchanges (limit ${frame.memory.limits.pairs}).`;
+  setJSON('history-json',frame.memory.recent_pairs);
+  $('memory').textContent=frame.memory.entries?.length?pretty(frame.memory.entries):(frame.memory.memory||'(No saved memories yet.)');$('speech').textContent=frame.speech.current?.text||'(no current speech)';
+  $('context').textContent=frame.model_context===undefined?'Restart the mod to enable this preview. Last request below shows the messages actually sent.':pretty(frame.model_context);setJSON('request',d.last_request);setJSON('full',data);
+  const pairs=frame.memory.recent_pairs||[],last=pairs.at(-1),decision=frame.last_decision??(last?{decision:last.decision,status:last.action_status}:null);$('decision').textContent=decision?pretty({...decision,dispatch:d.action_dispatch,wake:d.wake_dispatch}):'(no reply yet)';
+  const creatureName=frame.character_names?.creature_name?.trim()||'Creature';
+  const dialogue=frame.dialogue,signature=pretty([creatureName,dialogue]);if(signature!==historySignature){historySignature=signature;$('chat').replaceChildren();for(const pair of dialogue){const lines=[];if(pair.input.god_question)lines.push('God: '+pair.input.god_question);if(pair.answer?.trim())lines.push(creatureName+': '+pair.answer);if(pair.say?.trim())lines.push('Speech: '+pair.say);if(!lines.length)continue;const p=document.createElement('p');p.textContent=lines.join('\n');$('chat').append(p);}}
+}
+async function poll(){if(polling){pollAgain=true;return;}polling=true;try{render(await api(debugPath()));}catch(error){$('error').textContent=error.message;unavailable=true;$('send').disabled=true;$('thinking').hidden=true;$('reset-memory').disabled=true;$('reset-history').disabled=true;$('force-tick').disabled=true;}finally{polling=false;if(pollAgain){pollAgain=false;void poll();}}}
+async function configure(body){try{await api('configure',body);$('error').textContent='';await poll();return true;}catch(error){$('error').textContent=error.message;return false;}}
+async function resetData(scope){
+  if(resetting||sending)return;
+  resetting=true;$('reset-memory').disabled=true;$('reset-history').disabled=true;$('reset-statistics').disabled=true;
+  const status=$(scope==='statistics'?'statistics-status':'reset-status');
+  status.textContent='Resetting '+scope+'…';
+  try{await api('reset',{scope});status.textContent=scope==='statistics'?'Model statistics cleared. Memory, history and message-cap counter kept.':scope==='memory'?'Saved memory cleared. History kept.':'History cleared. Saved memory kept.';}
+  catch(error){status.textContent='Reset failed. Wait for pending replies and check storage status.';}
+  finally{resetting=false;await poll();}
+}
+$('reset-memory').onclick=()=>resetData('memory');$('reset-history').onclick=()=>resetData('history');
+$('reset-statistics').onclick=()=>resetData('statistics');
+$('force-tick').onclick=async()=>{
+  if(ticking)return;ticking=true;$('force-tick').disabled=true;
+  $('force-tick-status').textContent=' Sending status…';
+  try{const result=await api('force-tick',{});$('force-tick-status').textContent=result.sent?' Status sent; reply received.':' No update sent: context became empty.';}
+  catch(error){$('force-tick-status').textContent=' Update not completed. Check scene availability, pending replies and provider status.';}
+  finally{ticking=false;await poll();}
+};
+for(const key of cadenceKeys)$(key).oninput=()=>{cadenceDirty=true;};
+$('save-cadence').onclick=async()=>{if(!cadenceKeys.every(key=>$(key).reportValidity()))return;const cadence=Object.fromEntries(cadenceKeys.map(key=>[key,Number($(key).value)]));if(cadence.active_seconds>cadence.settlement_seconds||cadence.settlement_seconds>cadence.quiet_seconds||cadence.quiet_seconds>cadence.distant_seconds){$('error').textContent='Intervals must increase from active to distant.';return;}if(await configure({cadence})){cadenceDirty=false;await poll();}};
+$('automatic').onchange=()=>configure({automatic:$('automatic').checked});$('delay').onchange=()=>configure({delay_seconds:Number($('delay').value)});
+const inputHistory=[];let inputHistoryIndex=null,inputDraft='';
+$('question').addEventListener('keydown',event=>{
+  if(sending||!['ArrowUp','ArrowDown'].includes(event.key))return;
+  event.preventDefault();if(!inputHistory.length)return;
+  const direction=event.key==='ArrowUp'?-1:1;
+  if(inputHistoryIndex===null){if(direction>0)return;inputDraft=$('question').value;inputHistoryIndex=inputHistory.length;}
+  inputHistoryIndex=Math.max(0,Math.min(inputHistory.length,inputHistoryIndex+direction));
+  $('question').value=inputHistoryIndex===inputHistory.length?inputDraft:inputHistory[inputHistoryIndex];
+  if(inputHistoryIndex===inputHistory.length)inputHistoryIndex=null;
+});
+$('form').onsubmit=async event=>{event.preventDefault();if(sending||unavailable)return;const question=$('question').value;if(question.trim()&&inputHistory.at(-1)!==question){inputHistory.push(question);if(inputHistory.length>10)inputHistory.shift();}inputHistoryIndex=null;inputDraft='';sending=true;$('send').disabled=true;$('error').textContent='';try{await api('question',{question});$('question').value='';}catch(error){$('error').textContent=error.message;}finally{sending=false;await poll();$('send').disabled=unavailable;}};
+for(const id of Object.values(debugPanels)){const panel=$(id).closest('details');panel.addEventListener('toggle',()=>{if(!panel.open)$(id).textContent='';if(!document.hidden)void poll();});}
+poll();setInterval(()=>{if(!document.hidden&&!polling)poll();},2000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
+</script></html>

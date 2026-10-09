@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "batch-and-vibe"
+dynamic = ["version"]
+description = "Black & White LLM Creature Mod"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+llm = ["httpx>=0.27,<1"]
+service = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1"]
+launcher = ["httpx>=0.27,<1", "ziglang==0.14.1"]
+
+[project.scripts]
+bwv = "bwv.cli:main"
+bwv-play = "bwv.launcher:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+version = {attr = "bwv.__version__"}
+
+[tool.setuptools.package-data]
+bwv = ["builds.json", "settings.default.json", "qa.html", "qa_demo.html", "qa_live.html"]

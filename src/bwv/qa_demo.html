@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Creature chat — offline demo</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#111820;color:#e1eaf3}body{max-width:1120px;margin:32px auto;padding:0 20px}h1{font-size:26px}h2{font-size:18px}p{line-height:1.5}section,details{background:#1c2733;padding:18px;border-radius:10px;margin:16px 0}label{display:inline-block;margin:8px 18px 8px 0}input,select,button{font:inherit;padding:8px;border-radius:5px;border:1px solid #607080}button{cursor:pointer}button:disabled{opacity:.5;cursor:default}#question{flex:1;min-width:140px}form{display:flex;gap:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px;max-height:460px;overflow:auto}.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.badge{color:#ffd78e;font-weight:700}#error{color:#ffa898}#chat p{white-space:pre-wrap;border-bottom:1px solid #405060;padding-bottom:12px}#speech{font-size:20px}small{color:#a8bbce}@media(max-width:700px){.grid{display:block}}
+</style>
+<h1>Creature chat <span class="badge">Offline demo</span></h1>
+<p>Synthetic world and deterministic dummy replies. No game access, external model calls or game actions. This page tests the real conversation queue, memory and speech handling; it does not test native game sensors.</p>
+<section>
+<label>World <select id="scenario"><option value="ready">Ready</option><option value="hurt">Hurt</option><option value="paused">Paused</option><option value="cutscene">Cutscene</option><option value="temple">Temple interior</option><option value="no_creature">No creature</option><option value="empty">Empty context</option></select></label>
+<label><input type="checkbox" id="automatic" checked> Automatic creature thinking</label>
+<label>Reply delay <select id="delay"><option value="0">None</option><option value="1">1 second</option><option value="3">3 seconds</option></select></label>
+<button id="session" type="button">Simulate loading another save</button>
+<p id="status" aria-live="polite">Connecting…</p><p id="error" role="alert"></p>
+</section>
+<section><h2>Talk to your creature</h2>
+<p>Type a message to your creature. This demo uses a dummy responder, so it repeats ordinary messages instead of answering them intelligently.</p>
+<details><summary>Commands for testing the demo</summary><ul>
+<li><code>remember: be gentle with villagers</code> — save a memory, replacing the previous memory.</li>
+<li><code>memory</code> — read the saved memory.</li>
+<li><code>status</code> — show the current simulated world information.</li>
+<li><code>say: Hello!</code> — display “Hello!” in the creature’s speech panel.</li>
+<li><code>forget</code> — clear the saved memory. Recent chat history is kept.</li>
+</ul></details>
+<form id="form"><input id="question" aria-label="Message to your creature" placeholder="Type a message to your creature…" maxlength="2000" required><button id="send">Send</button></form>
+<p id="availability"></p><div id="chat"></div></section>
+<div class="grid"><section><h2>Speech</h2><p id="speech"></p><small>Replaced by new speech, or expires after 15 seconds.</small></section><section><h2>Persistent demo memory</h2><pre id="memory"></pre><small>Separate from real creature memory. Shared across simulated saves and demo restarts.</small></section></div>
+<section><h2>Current model-formatted snapshot</h2><pre id="context"></pre></section>
+<details><summary>Last actual dummy request: system, memory, conversation and snapshot</summary><pre id="request"></pre></details>
+<details><summary>Full debug JSON</summary><pre id="full"></pre></details>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), pretty=value=>JSON.stringify(value,null,2);
+let sending=false, unavailable=true, polling=false, historySignature='';
+async function api(path,body){const response=await fetch(path,body===undefined?{cache:'no-store'}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!response.ok)throw Error(response.status===400?'Request unavailable or invalid. Check whether a creature is present.':`Request failed (${response.status}); the session may have changed.`);return response.json();}
+function render(data){const frame=data.current,d=data.demo;if(!frame||!d)return;
+  $('scenario').value=d.scenario;$('automatic').checked=d.automatic;$('delay').value=String(d.delay_seconds);
+  $('status').textContent=`Automatic creature thinking: ${d.automatic?(frame.gate.allowed?'enabled':'blocked: '+frame.gate.reasons.join(', ')):'disabled'} · Dummy calls: ${d.dummy_requests} · Active: ${d.active_requests} · Queued questions: ${d.pending_questions} · Pending tick: ${d.pending_tick?'yes':'no'} · Merged ticks: ${d.merged_ticks} · External calls: 0 · Game actions: 0`;
+  unavailable=Boolean(frame.question_unavailable);$('send').disabled=sending||unavailable;
+  $('availability').textContent=unavailable?'Chat unavailable: '+frame.question_unavailable:'Messages do not wait for the next scheduled thought. You can chat while paused or in a cutscene, provided your creature is available.';
+  $('memory').textContent=frame.memory.memory||'(empty)';$('speech').textContent=frame.speech.current?.text||'(no current speech)';
+  $('context').textContent=pretty(frame.model_context||{});$('request').textContent=pretty(d.last_request);$('full').textContent=pretty(data);
+  const creatureName=frame.character_names?.creature_name?.trim()||'Creature';
+  const pairs=frame.dialogue,signature=pretty([creatureName,pairs]);if(signature!==historySignature){historySignature=signature;$('chat').replaceChildren();for(const pair of pairs){const lines=[];if(pair.input.god_question)lines.push('You: '+pair.input.god_question);if(pair.answer?.trim())lines.push(creatureName+': '+pair.answer);if(pair.say?.trim())lines.push('Speech: '+pair.say);if(!lines.length)continue;const p=document.createElement('p');p.textContent=lines.join('\n');$('chat').append(p);}}
+}
+async function poll(){if(polling)return;polling=true;try{render(await api('state'));}catch(error){$('error').textContent=error.message;}finally{polling=false;}}
+async function configure(body){try{await api('configure',body);$('error').textContent='';await poll();}catch(error){$('error').textContent=error.message;}}
+$('scenario').onchange=()=>configure({scenario:$('scenario').value});$('automatic').onchange=()=>configure({automatic:$('automatic').checked});$('delay').onchange=()=>configure({delay_seconds:Number($('delay').value)});$('session').onclick=()=>configure({new_session:true});
+$('form').onsubmit=async event=>{event.preventDefault();if(sending||unavailable)return;sending=true;$('send').disabled=true;$('error').textContent='';try{await api('question',{question:$('question').value});$('question').value='';}catch(error){$('error').textContent=error.message;}finally{sending=false;await poll();$('send').disabled=unavailable;}};
+poll();setInterval(()=>{if(!document.hidden)poll();},1000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
+</script></html>

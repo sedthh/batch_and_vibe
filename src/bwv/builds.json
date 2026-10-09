@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "builds": [
+    {
+      "id": "bw1-142",
+      "label": "Black & White 1, supported unofficial patch 1.42 build",
+      "status": "experimental",
+      "gameplay_writes": false,
+      "notes": "Build description only. Exact compatibility is checked by the implementation; this is not ownership verification."
+    }
+  ]
+}
