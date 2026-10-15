@@ -125,7 +125,7 @@ class ObjectDetailTests(unittest.TestCase):
         self.assertEqual(result['objects'][0]['distance_engine_units'],200)
         self.assertNotIn('lookup_handle',json.dumps(result))
 
-    def test_all_objects_paginate_and_importance_only_applies_to_generic_search(self):
+    def test_all_objects_paginate_and_urgent_objects_stay_first_in_specific_search(self):
         source=frame();objects=[]
         for i,kind in enumerate(('tree','rock','food_pile','miracle_bubble','house','creature')):
             objects.append({'object_id':str(i),'kind':kind,'distance_engine_units':i+1,'lookup_handle':100+i})
@@ -140,7 +140,8 @@ class ObjectDetailTests(unittest.TestCase):
         self.assertNotIn('lookup_handle',json.dumps(session.trace))
         burn={**objects[0],'on_fire':True}
         self.assertLess(lookup_order(burn),lookup_order(objects[-1]))
-        self.assertLess(lookup_order(objects[0],explicit_kind=True),lookup_order(objects[-1],explicit_kind=True))
+        self.assertLess(lookup_order(burn,explicit_kind=True),lookup_order(objects[0],explicit_kind=True))
+        self.assertLess(lookup_order(objects[0],explicit_kind=True),lookup_order({**objects[0],'distance_engine_units':20},explicit_kind=True))
 
     def test_species_search_and_shared_metadata_whitelist(self):
         source=frame();source['observation']['surroundings']['known_objects']=[{

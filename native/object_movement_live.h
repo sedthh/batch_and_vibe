@@ -5,13 +5,13 @@
 
 namespace bwv_probe {
 bool movement_belief(uintptr_t p) {
-    const char* names[]={"CreatureBeliefSmall","CreatureBelief","CreatureBeliefAboutAbode",
-        "CreatureBeliefAboutCitadel","CreatureBeliefAboutCreature","CreatureBeliefAboutFlock",
-        "CreatureBeliefAboutForest","CreatureBeliefAboutMobileObject","CreatureBeliefAboutTown",
-        "CreatureBeliefAboutVillager"};
+    constexpr const char* names[]={".?AVCreatureBeliefSmall@@",".?AVCreatureBelief@@",".?AVCreatureBeliefAboutAbode@@",
+        ".?AVCreatureBeliefAboutCitadel@@",".?AVCreatureBeliefAboutCreature@@",".?AVCreatureBeliefAboutFlock@@",
+        ".?AVCreatureBeliefAboutForest@@",".?AVCreatureBeliefAboutMobileObject@@",".?AVCreatureBeliefAboutTown@@",
+        ".?AVCreatureBeliefAboutVillager@@"};
+    const auto check=object_type_view(p,word,type_table);
     for (const char* name:names) {
-        const std::string expected=".?AV"+std::string(name)+"@@";
-        if (type(p,expected.c_str())) return true;
+        if (check(p,name)) return true;
     }
     return false;
 }
@@ -93,7 +93,8 @@ ObjectPoint inspect_object_target(uintptr_t creature, uintptr_t mental, uintptr_
         for (uint32_t i=0;i<count;++i) {
             if (!node || !movement_belief(node) || word(node+12)!=previous) return {};
             const uintptr_t obj=word(node+0x30);
-            const unsigned kind=type(obj,".?AVTree@@")?1:type(obj,".?AVRock@@")?2:0;
+            const auto check=object_type_view(obj,word,type_table);
+            const unsigned kind=check(obj,".?AVTree@@")?1:check(obj,".?AVRock@@")?2:0;
             if (kind) {
                 int32_t x=0,z=0; float altitude=0;
                 if (!read(obj+0x14,x) || !read(obj+0x18,z) || !read(obj+0x1C,altitude)

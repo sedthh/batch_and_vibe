@@ -9,6 +9,8 @@
 #include <vector>
 #include <array>
 #include "snapshot_payload.h"
+#include "reader_activity.h"
+#include "work_timing.h"
 
 #ifdef BWV_ACTION_PROBE
 #include "action_probe.h"
@@ -28,6 +30,8 @@ ULONGLONG last_capture = 0;
 int vm_version = 0;
 bool initialized = false;
 volatile LONG snapshot_invalidated = 1;
+bwv_observer::ReaderActivity reader_activity;
+bwv_observer::WorkTiming bridge_work, snapshot_work;
 
 using Callback = int(__cdecl*)(uint32_t);
 using ErrorCallback = int(__cdecl*)(uint32_t, const char*);
@@ -80,6 +84,7 @@ void reset_observation() {
 }
 
 void record_native(uint32_t slot, bool leaving) {
+    if (!reader_activity.active(GetTickCount64())) return;
     if (leaving) ++callbacks_left; else ++callbacks_entered;
     if (slot >= traced_slots.size() || !traced_slots[slot]) return;
     const uint64_t sequence = ++event_count;
@@ -189,6 +194,7 @@ int __cdecl capture_variable(const char* name, uint32_t type, float value) {
 
 void capture(int context) {
     if (GetTickCount64() - last_capture < 500) return;
+    bwv_observer::TimedWork measured(snapshot_work);
     last_capture = GetTickCount64();
     observed_globals.clear();
     // Read APIs are called only on the thread that just ran the VM scheduler.
@@ -233,7 +239,9 @@ void capture(int context) {
 #ifdef BWV_ACTION_PROBE
     data += ",\"action_probe\":" + bwv_probe::json();
 #endif
-    data += "}\n";
+    data += ",\"bridge_performance\":{\"work\":"+bridge_work.json()
+        +",\"snapshot\":"+snapshot_work.json()+",\"reader_timeout_ms\":"
+        +std::to_string(bwv_observer::ReaderActivity::timeout_ms)+"}}\n";
     bwv_snapshot::bound(data);
     // Never make the game wait for a reader.
     if (TryAcquireSRWLockExclusive(&snapshot_lock)) {
@@ -268,6 +276,17 @@ DWORD WINAPI serve(void*) {
     if (pipe == INVALID_HANDLE_VALUE) return 5;
     for (;;) {
         if (ConnectNamedPipe(pipe, nullptr) || GetLastError() == ERROR_PIPE_CONNECTED) {
+            // Mark stale before waking the game thread. Reattachment must not
+            // serve the last snapshot from a previous observer session as new.
+            const auto now=GetTickCount64();
+            const bool resuming=!reader_activity.active(now);
+            if(resuming)InterlockedExchange(&snapshot_invalidated,1);
+            reader_activity.touch(now);
+            if(resuming) {
+                const auto deadline=now+1000;
+                while(InterlockedCompareExchange(&snapshot_invalidated,0,0)
+                        && GetTickCount64()<deadline)Sleep(10);
+            }
             AcquireSRWLockShared(&snapshot_lock);
             std::string response = InterlockedCompareExchange(&snapshot_invalidated, 0, 0) ?
                 "{\"protocol\":1,\"mode\":\"observer\",\"ready\":false,\"capabilities\":[],\"lifecycle\":\"invalidated\"}\n" : cached;
@@ -334,8 +353,16 @@ extern "C" int __cdecl bwv_LookIn(int context, int flag) {
     if (!ensure()) return 0;
     int result = look_in(context, flag);
     ++ticks;
+    const bool observing=reader_activity.active(GetTickCount64());
+    if(!observing) {
 #ifdef BWV_ACTION_PROBE
-    if (initialized && vm_version == 7) bwv_probe::tick(epoch);
+        if(initialized && vm_version==7)bwv_probe::tick(epoch,false);
+#endif
+        return result;
+    }
+    bwv_observer::TimedWork measured(bridge_work);
+#ifdef BWV_ACTION_PROBE
+    if (initialized && vm_version == 7) bwv_probe::tick(epoch,true);
 #endif
     capture(context);
     return result;

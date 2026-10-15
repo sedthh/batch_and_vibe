@@ -82,7 +82,7 @@ inline constexpr size_t world_recipe_count=sizeof(world_recipes)/sizeof(WorldRec
 // CitadelHeart, despite sharing the public temple kind, IS a physical Object.
 template<class Type>
 bool location_only_target(const ThrowPoint& point,Type type) {
-    return type(point.object,".?AVCitadel@@") || type(point.object,".?AVFlock@@");
+    return point.position_only || type(point.object,".?AVCitadel@@") || type(point.object,".?AVFlock@@");
 }
 template<class Type>
 bool world_target_supported(const WorldRecipe& recipe,const ThrowPoint& point,Type type) {

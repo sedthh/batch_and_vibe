@@ -64,7 +64,7 @@ def main() -> None:
         actual=subprocess.check_output([str(signature_test),str(fixture)],text=True,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).strip()
         assert actual==expected,(name,actual,expected)
-    for name in ("action_probe_policy", "command_priority", "catalog_refresh", "type_name_cache", "activity_guard", "movement_guard", "movement_pace", "object_movement_guard", "action_catalog", "held_action_guard", "held_miracle", "throw_targets", "target_pool", "miracle_actions", "world_actions", "individual_gesture", "pickup_completion", "pickup_eligibility", "snapshot_payload"):
+    for name in ("action_probe_policy", "command_priority", "catalog_refresh", "reader_activity", "type_name_cache", "object_type_view", "object_hierarchy", "activity_guard", "movement_guard", "movement_pace", "object_movement_guard", "action_catalog", "held_action_guard", "held_miracle", "throw_targets", "target_pool", "miracle_actions", "world_actions", "individual_gesture", "pickup_completion", "pickup_eligibility", "snapshot_payload"):
         executable = lab / f"{name}.exe"
         subprocess.run(compiler + ["-std=c++17", str(ROOT / f"tests/native/{name}.cpp"),
                                   "-o", str(executable)], check=True, env=env)
@@ -77,6 +77,21 @@ def main() -> None:
     subprocess.run(compiler + options + ["-shared", str(ROOT / "tests/native/fake_vm.cpp"), "-o", str(lab / "_bwv_original_vm.dll")], check=True, env=env)
     subprocess.run(compiler + [str(ROOT / "tests/native/host.cpp"), "-o", str(lab / "host.exe")], check=True, env=env)
     shutil.copyfile(bridge, lab / "ScriptLibraryR.dll")
+    with subprocess.Popen([str(lab / 'host.exe'), '--idle'], cwd=lab,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                          creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)) as idle:
+        try:
+            assert idle.stdout.readline().strip()==b'idle_ready'
+            before=snapshot(idle.pid)
+            assert before['ready'] is True and before['source_age_ms']<1500,before
+            assert idle.stdout.readline().strip()==b'idle_suspended'
+            after=snapshot(idle.pid)
+            assert after['ticks']>before['ticks'] and after['source_age_ms']<1500,after
+            out,err=idle.communicate(timeout=5)
+            assert idle.returncode==0 and b'idle_resumed' in out,(idle.returncode,out,err)
+            print(json.dumps({'reader_idle_suspend_resume':'passed','idle_callback_forwarding':'passed'}))
+        except BaseException:
+            idle.kill();idle.communicate();raise
     with subprocess.Popen([str(lab / "host.exe")], cwd=lab, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)) as host:
         try:

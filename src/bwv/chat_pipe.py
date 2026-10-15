@@ -5,7 +5,7 @@ from multiprocessing import AuthenticationError
 import re
 import secrets
 import threading
-from .errors import MESSAGES
+from .errors import MESSAGES, ChatNotSubmitted
 
 MAX_RESPONSE = 8 * 1024 * 1024
 
@@ -58,6 +58,9 @@ class ChatPipeServer:
                     body = json.dumps({'result': result}, allow_nan=False).encode('utf-8')
                     if len(body) > MAX_RESPONSE:
                         raise ValueError('Chat state is too large')
+                except ChatNotSubmitted as error:
+                    body = json.dumps({'error':MESSAGES['chat_unavailable'],
+                        'not_submitted':True,'retryable':error.retryable}).encode()
                 except (ValueError, RuntimeError, KeyError, TypeError):
                     body = json.dumps({'error': MESSAGES['chat_unavailable']}).encode()
                 connection.send_bytes(body)
@@ -81,5 +84,7 @@ class ChatPipeClient:
                 raise TimeoutError('Creature chat did not respond in time')
             response = json.loads(connection.recv_bytes(MAX_RESPONSE))
         if 'error' in response:
+            if response.get('not_submitted') is True:
+                raise ChatNotSubmitted(retryable=response.get('retryable') is True)
             raise ValueError(response['error'])
         return response['result']

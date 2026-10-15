@@ -68,13 +68,16 @@ class ObjectTypesTests(unittest.TestCase):
                 (b'.?AVMobileStatic@@', b'.?AVGMobileStaticInfo@@', 0x120, (398, 404)),
                 (b'.?AVMobileObject@@', b'.?AVGMobileStaticInfo@@', 0x104, (18, 19))):
             for value in values:
-                self.assertEqual(self.sample(name, info, offset, value).nearby_known_objects, ())
+                objects=self.sample(name, info, offset, value).nearby_known_objects
+                self.assertEqual(len(objects),1)
+                self.assertEqual(objects[0].kind,'object')
+                self.assertEqual(objects[0].engine_class,name[4:-2].decode())
 
     def test_feature_mushroom_is_exact_table_entry(self):
         for info in (FEATURE_MUSHROOM_INFO - 0x124, FEATURE_MUSHROOM_INFO, FEATURE_MUSHROOM_INFO + 0x124):
             context = self.sample(b'.?AVFeature@@', b'.?AVGFeatureInfo@@', info=info)
             self.assertEqual([o.kind for o in context.nearby_known_objects],
-                             ['mushroom'] if info == FEATURE_MUSHROOM_INFO else [])
+                             ['mushroom'] if info == FEATURE_MUSHROOM_INFO else ['object'])
 
     def test_held_mushroom_and_generic_toy_are_named(self):
         from test_holding_live import HoldingMemory

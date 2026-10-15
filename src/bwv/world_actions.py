@@ -64,6 +64,7 @@ NEARBY_TARGET_DISTANCE=360
 KNOWN_TARGET_DISTANCE=20000
 WORLD_KINDS=('self','tree','rock','villager','house','creature','temple','toy','food_pile','wood_pile','animal','miracle_bubble','field','miracle_dispenser','fishing_area','animal_group')
 WORLD_KINDS += ('storage','nursery','cemetery','workshop','wonder','town_centre','totem','windmill','worship_site','fence','mushroom','bonfire','scaffolding')
+WORLD_KINDS += ('object',)
 
 
 def valid_target_metadata(entry):

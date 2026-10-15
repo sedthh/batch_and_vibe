@@ -16,7 +16,8 @@ import sys
 import threading
 import time
 
-from .overlay import OverlayModel, overlay_bounds
+from .overlay import OverlayModel, ChatSubmission, overlay_bounds
+from .errors import ChatNotSubmitted
 
 
 class Windows:
@@ -84,7 +85,8 @@ class Windows:
         return max(matches)[1] if matches else None
 
     def own_style(self, hwnd, expanded, *, readable=False):
-        style=self.get_long(hwnd,-20)|0x80|0x80000  # tool window, layered
+        previous=self.get_long(hwnd,-20)
+        style=previous|0x80|0x80000  # tool window, layered
         style &= ~0x40000  # no taskbar button
         if expanded:
             style &= ~(0x08000000|0x20)
@@ -92,7 +94,7 @@ class Windows:
             style |= 0x08000000  # scrolling must not activate the input/game menu
             if readable:style &= ~0x20
             else:style |= 0x20  # empty collapsed banner remains click-through
-        self.set_long(hwnd,-20,style)
+        if style!=previous:self.set_long(hwnd,-20,style)
 
 
 def hotkey_loop(user32, stop, wanted, emit):
@@ -136,9 +138,11 @@ class OverlayWindow:
         self.want_hotkey=threading.Event();self.hotkey_events=0
         self.state_lock=threading.Lock();self.latest_state=None
         self.expanded=False;self.pending=False;self.closed=False;self.game=None
+        self.submission=None
         self.notice=''
         self.restore_input_focus=False
         self.hotkey=False;self.hotkey_failed=False;self.geometry=None
+        self._content_state=None;self._visible=False
         self.deadline=time.monotonic()+seconds
         self.diagnostics_file=Path(diagnostics_file) if diagnostics_file else None
         self.last_diagnostic=None;self.target_identity=None
@@ -196,7 +200,7 @@ class OverlayWindow:
     def poll_service(self):
         while not self.stop.is_set():
             try:self.emit('state',self.client.state())
-            except (OSError,ValueError,KeyError):self.emit('disconnected',None)
+            except (OSError,ValueError,KeyError,EOFError):self.emit('disconnected',None)
             self.stop.wait(.4)
 
     def toggle(self):
@@ -209,6 +213,7 @@ class OverlayWindow:
         self.expanded=True
         self.win.own_style(self.hwnd,True)
         self.win.u.ShowWindow(self.hwnd,5)
+        self._visible=True
         self.win.u.SetForegroundWindow(self.hwnd)
         self.root.after_idle(self.entry.focus_set)
         self.render()
@@ -223,22 +228,43 @@ class OverlayWindow:
         return 'break'
 
     def submit(self):
-        if self.pending or not self.model.can_send():return 'break'
+        if self.pending:return 'break'
         text=self.entry.get().strip()
         if not text:return 'break'
+        identity=self.model.identity or self.target_identity
+        if identity is None:
+            self.notice='[Message not sent: waiting for creature chat. Your text is kept.]'
+            self.render();return 'break'
         self.input_history.submitted(text)
         self.pending=True;self.notice=''
-        identity=self.model.identity
-        def send():
-            try:self.emit('reply',(identity,self.client.ask(text,identity)))
-            except (OSError,ValueError):
-                # Fetch the error from this request, rather than a stale poll.
-                try:self.emit('failure_state',self.client.state())
-                except (OSError,ValueError):self.emit('failure_state',None)
-                self.emit('failed',identity)
-        threading.Thread(target=send,daemon=True).start()
+        self.submission=ChatSubmission(text,identity,time.monotonic()+15)
+        self.advance_submission()
         self.render()
         return 'break'
+
+    def advance_submission(self):
+        submission=getattr(self,'submission',None)
+        if submission is None:return
+        now=time.monotonic()
+        readiness=submission.readiness(self.model,now)
+        if readiness in ('changed','expired'):
+            self.submission=None;self.pending=False
+            self.entry.configure(state='normal')
+            self.notice=('[Message not sent: chat is still unavailable. Your text is kept; press Enter to retry.]'
+                if readiness=='expired' else '[Chat session changed. Your text is kept.]')
+            return
+        if readiness!='ready':return
+        submission.sending=True
+        def send():
+            try:self.emit('reply',(submission,self.client.ask(submission.text,submission.identity)))
+            except ChatNotSubmitted as error:
+                self.emit('not_submitted',(submission,error.retryable))
+            except (OSError,ValueError,EOFError):
+                # Fetch the error from this request, rather than a stale poll.
+                try:state=self.client.state()
+                except (OSError,ValueError,EOFError):state=None
+                self.emit('failed',(submission,state))
+        threading.Thread(target=send,daemon=True).start()
 
     def browse_input(self, direction):
         if self.pending:return 'break'
@@ -247,46 +273,56 @@ class OverlayWindow:
         return 'break'
 
     def render(self):
-        available=self.model.can_send()
         if not self.model.can_show():
             focused=self.win.u.GetForegroundWindow()==self.hwnd
             # Keep the draft and open-input intent across a scene lock.
             if focused and self.expanded:self.restore_input_focus=True
             self.win.own_style(self.hwnd,False)
             self.want_hotkey.clear()
-            self.entry.configure(state='disabled');self.send.configure(state='disabled')
-            self.win.u.ShowWindow(self.hwnd,0)
-            self.geometry=None
+            if getattr(self,'_content_state',None)!=('hidden',):
+                self.entry.configure(state='disabled');self.send.configure(state='disabled')
+                self._content_state=('hidden',)
+            self.hide_window()
             if focused and self.game and self.win.pid(self.game)==self.model.game_pid:
                 self.win.u.SetForegroundWindow(self.game)
             self.diagnostics(False)
             return
         speech=self.model.banner_text(pending=self.pending,notice=self.notice)
+        submission=getattr(self,'submission',None)
+        if submission is not None and not submission.sending:
+            speech=submission.notice(time.monotonic())
         title=self.model.chat_title+' · Ctrl+Enter'
         if self.model.is_dummy:
             title += ' · Dummy'
         if self.hotkey_failed:title='Ctrl+Enter is already in use'
-        self.heading.configure(text=title)
-        self.indicator.configure(text=self.model.call_indicator(pending=self.pending),
-            fg='#58d878')
-        compact_speech=speech
-        if compact_speech!=self.message_text:
-            self.message.configure(state='normal');self.message.delete('1.0','end')
-            self.message.insert('1.0',compact_speech);self.message.configure(state='disabled')
-            self.message.yview_moveto(0)
-            self.message_text=compact_speech
-        if speech:
-            self.message_box.pack(fill='both',expand=True,padx=8,pady=(0,2))
-        else:self.message_box.pack_forget()
-        # Replies stay scrollable even after the input form closes.
-        if speech:self.message_scroll.pack(side='right',fill='y',before=self.message)
-        else:self.message_scroll.pack_forget()
-        if self.expanded:
-            self.form.pack(fill='x',side='bottom',padx=8,pady=(0,5))
-        else:
-            self.form.pack_forget()
-        self.entry.configure(state='normal' if not self.pending else 'disabled')
-        self.send.configure(state='normal' if available and not self.pending else 'disabled')
+        indicator=self.model.call_indicator(pending=self.pending)
+        button_text='Waiting…' if submission is not None and not submission.sending else 'Send'
+        content=(title,indicator,speech,self.expanded,self.pending,bool(self.model.identity),button_text)
+        # Tk configure/pack calls invalidate the layered window even when their
+        # values are unchanged. Poll availability promptly without repainting
+        # the overlay over the game's render surface on every timer tick.
+        if content!=getattr(self,'_content_state',None):
+            self.heading.configure(text=title)
+            self.indicator.configure(text=indicator,fg='#58d878')
+            if speech!=self.message_text:
+                self.message.configure(state='normal');self.message.delete('1.0','end')
+                self.message.insert('1.0',speech);self.message.configure(state='disabled')
+                self.message.yview_moveto(0)
+                self.message_text=speech
+            if speech:
+                self.message_box.pack(fill='both',expand=True,padx=8,pady=(0,2))
+            else:self.message_box.pack_forget()
+            # Replies stay scrollable even after the input form closes.
+            if speech:self.message_scroll.pack(side='right',fill='y',before=self.message)
+            else:self.message_scroll.pack_forget()
+            if self.expanded:
+                self.form.pack(fill='x',side='bottom',padx=8,pady=(0,5))
+            else:
+                self.form.pack_forget()
+            self.entry.configure(state='normal' if not self.pending else 'disabled')
+            self.send.configure(state='normal' if self.model.identity and not self.pending else 'disabled')
+            self.send.configure(text=button_text)
+            self._content_state=content
         rect=self.win.rect(self.game) if self.game else None
         # Add exactly the input form's requested height (including its padding)
         # so opening it does not steal a pixel from the reply/scrollbar viewport.
@@ -303,18 +339,23 @@ class OverlayWindow:
             # screen coordinates. This also supports monitors left of primary.
             if self.root.state()=='withdrawn':
                 self.root.deiconify();self.win.own_style(self.hwnd,self.expanded,readable=bool(speech))
-            self.win.u.SetWindowPos(self.hwnd,ctypes.c_void_p(-1),x,y,width,height,0x10|0x40)
+            if self.geometry!=bounds:
+                self.win.u.SetWindowPos(self.hwnd,ctypes.c_void_p(-1),x,y,width,height,0x10|0x40)
             self.geometry=bounds
+            self._visible=True
             if self.expanded and self.restore_input_focus:
                 self.win.u.SetForegroundWindow(self.hwnd)
                 self.root.after_idle(self.entry.focus_set)
                 self.restore_input_focus=False
         else:
-            self.win.u.ShowWindow(self.hwnd,0)
-            self.geometry=None
+            self.hide_window()
         if visible:self.want_hotkey.set()
         else:self.want_hotkey.clear()
         self.diagnostics(visible)
+
+    def hide_window(self):
+        if getattr(self,'_visible',None) is not False:self.win.u.ShowWindow(self.hwnd,0)
+        self._visible=False;self.geometry=None
 
     def diagnostics(self, visible):
         if not self.diagnostics_file:return
@@ -343,6 +384,7 @@ class OverlayWindow:
         if state:
             if state[0]=='state':self.model.update(state[1])
             else:self.model.read_gap()
+        preserve_draft=False
         for _ in range(32):
             try:kind,value=self.events.get_nowait()
             except queue.Empty:break
@@ -350,32 +392,41 @@ class OverlayWindow:
                 self.close();return
             elif kind=='hotkey_state':
                 self.hotkey,self.hotkey_failed=value
-            elif kind=='failure_state':
-                if value:self.model.update(value)
-                else:self.model.provider_error='chat_transport_failed'
             elif kind=='toggle':
                 self.hotkey_events+=1
                 self.toggle()
-            elif kind in ('reply','failed'):
-                self.pending=False
-                identity=value[0] if kind=='reply' else value
-                if identity==self.model.identity and self.model.can_send():
+            elif kind in ('reply','failed','not_submitted'):
+                submission,result=value
+                if submission is not getattr(self,'submission',None):continue
+                if kind=='not_submitted' and result:
+                    submission.retry(time.monotonic())
+                    continue
+                self.pending=False;self.submission=None
+                preserve_draft=kind!='reply'
+                if submission.identity==self.model.identity or self.model.identity is None:
                     if kind=='reply':
                         self.entry.configure(state='normal');self.entry.delete(0,'end')
                         self.notice=''
-                        message=value[1].get('last_message')
+                        message=result.get('last_message')
                         if message is not None:
                             try:self.model.accept_message(message)
                             except (KeyError,TypeError,ValueError):pass
-                    else:self.notice=self.model.send_failure_notice()
+                    else:
+                        if kind=='failed':
+                            if result:self.model.update(result)
+                            else:self.model.provider_error='chat_transport_failed'
+                        self.notice=(self.model.send_failure_notice() if kind=='failed' else
+                            '[Message not sent: the game session changed. Your text is kept.]')
         # A scene lock or short read gap can hide identity. Keep the unsent
         # entry locally until the same creature returns; a verified different
-        # recipient still clears it. Nothing is sent automatically on resume.
+        # recipient cancels queued delivery; never send an old command to it.
         if self.model.identity is not None and self.target_identity!=self.model.identity:
             if self.target_identity is not None:
                 self.expanded=False;self.restore_input_focus=False
-            self.entry.configure(state='normal');self.entry.delete(0,'end')
+            if getattr(self,'submission',None) is None and not preserve_draft:
+                self.entry.configure(state='normal');self.entry.delete(0,'end')
             self.target_identity=self.model.identity
+        self.advance_submission()
         if not self.game or self.win.pid(self.game)!=self.model.game_pid or not self.win.rect(self.game):
             self.game=self.win.game_window(self.model.game_pid)
         if self.expanded and self.model.can_send() and self.win.u.GetForegroundWindow() not in (0,self.game,self.hwnd):

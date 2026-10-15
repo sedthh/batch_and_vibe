@@ -1,6 +1,14 @@
 """Shared world-object categories and subtype metadata; no game calls."""
 from .animal_types import ANIMAL_TYPES
 from .building_types import BUILDING_TYPES
+import re
+
+
+def engine_class_name(runtime_type):
+    """A bounded RTTI label, not an invented gameplay category or capability."""
+    if not isinstance(runtime_type, bytes):return None
+    match = re.fullmatch(rb'\.\?AV([A-Za-z][A-Za-z0-9_]{0,55})@@', runtime_type)
+    return match[1].decode('ascii') if match else None
 
 
 OBJECT_KINDS = {b'.?AVTree@@':'tree', b'.?AVVillager@@':'villager',

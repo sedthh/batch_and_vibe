@@ -3,13 +3,13 @@ from bwv.sampling import DetailRefresh
 
 
 class DetailRefreshTests(unittest.TestCase):
-    def test_four_fast_polls_reuse_one_scan_without_relabelling_its_time(self):
+    def test_twelve_fast_polls_reuse_one_scan_without_relabelling_its_time(self):
         cache=DetailRefresh();reads=0
-        for i in range(16):
+        for i in range(48):
             now=i*.25
             if cache.due('creature',now,i):
                 reads+=1;cache.store('creature','world',now,20,cache.requested)
-            self.assertEqual(cache.diagnostics(now)['age_seconds'],(i%4)*.25)
+            self.assertEqual(cache.diagnostics(now)['age_seconds'],(i%12)*.25)
         self.assertEqual(reads,4)
 
     def test_demand_refresh_is_coalesced_and_not_acknowledged_by_an_older_scan(self):

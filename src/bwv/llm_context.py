@@ -21,7 +21,7 @@ your goal, a completed action or permission to execute it. LLM goals belong in
 memory until an action is actually requested; events.action_results reports
 observed progress or a specifically confirmed outcome, not automatic success.
 Repeated event_id values refer to the same event.
-activity.sleep_phase distinguishes preparing_to_sleep, falling_asleep, asleep
+activity.sleep_phase distinguishes awake, preparing_to_sleep, falling_asleep, asleep
 and waking_up; activity.sleeping is true only for the asleep phase.
 activity.leash describes the selected leash and its attachment. An object
 attachment includes target.object_id and type when known; use inspect_object
@@ -72,6 +72,14 @@ verified eyesight. Food/wood pile counts are not resource quantities.
 When surroundings_also_near_god_hand is true, both views contain the same observed
 objects, so surroundings is shared and the duplicate hand summary is omitted.
 Identical town lists are also shown only once in towns_nearby in that case.
+Town needs includes only the demand categories backed by that town's storage
+flags. Internal desires without flags are omitted. top_needs gives the three
+largest positive flag demands; {} means no positive demand among observed flags.
+inspect_object on a town_id or linked building/storage gives all observed flag
+demands, including zeroes. homes means housing/building expansion; children means
+population growth. Scores are unsmoothed engine demands, not exact visible flag
+heights, percentages or stocks. Missing/null means unknown; demand alone does
+not make an action available. Meeting those needs can help impress villagers.
 portals distinguishes one-way next_island vortex entrances/exits from temporary,
 two-way same_island Teleport gates. deposits totals are engine-recorded transfers,
 not arrivals or recent events. They may lag; missing/unavailable means unknown.
@@ -191,6 +199,7 @@ NEARBY_COUNTS = {'important_people_nearby','dead_people_nearby','toys_nearby','m
 NEARBY_COUNTS.update(('houses_nearby','storages_nearby','nurseries_nearby','cemeteries_nearby',
     'workshops_nearby','wonders_nearby','town_centres_nearby','totems_nearby','windmills_nearby',
     'worship_sites_nearby','temples_nearby','fences_nearby'))
+NEARBY_COUNTS.add('other_objects_nearby')
 
 
 def god_hand_context(source, now):
@@ -299,7 +308,7 @@ def summarize_context(context, raw=None, *, probe=None):
     if context.get('current_miracle_plan'):activity['miracle_being_planned']=context['current_miracle_plan']
     if context.get('native_thought_text'):activity['native_thought_text']=context['native_thought_text']
     phase=context.get('sleep_phase')
-    if phase in ('preparing_to_sleep','falling_asleep','asleep','waking_up'):
+    if phase in ('awake','preparing_to_sleep','falling_asleep','asleep','waking_up'):
         activity['sleep_phase']=phase
         if phase=='asleep':activity['sleeping']=True
     elif context.get('sleeping') is True:activity['sleeping']=True

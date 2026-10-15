@@ -79,6 +79,9 @@ def target_matches(requested, target):
         if key in _FIRE_ALIASES:
             return target.get('on_fire') is True
     if kind_matches(requested,target['kind']):return True
+    if requested is not None and target.get('kind')=='object' and target.get('engine_class'):
+        label=re.sub(r'(?<=[a-z0-9])(?=[A-Z])','_',target['engine_class'])
+        if _key(requested).removesuffix('s')==_key(label).removesuffix('s'):return True
     if requested is not None and target.get('species'):
         key=_key(requested)
         if key.endswith('_creature') or key.endswith('_creatures'):

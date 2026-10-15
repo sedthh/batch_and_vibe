@@ -3,11 +3,13 @@ from tempfile import TemporaryDirectory
 import threading
 import time
 import unittest
+from unittest.mock import patch
 
 from bwv.overlay import ChatInputHistory, OverlayClient, OverlayModel, overlay_bounds
 from bwv.qa import make_server
 from bwv.qa_live import LiveDummyRuntime
 from bwv.profile_names import ProfileNames
+from bwv.errors import ChatNotSubmitted
 
 
 def payload(now=100, **changes):
@@ -342,9 +344,19 @@ class OverlayTransportTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn('heal',reply['reply']['answer'])
                 self.assertEqual(reply['game_actions'],0)
                 before=runtime.broker.calls_started
-                with self.assertRaises(OSError):
+                with self.assertRaises(ChatNotSubmitted) as caught:
                     await asyncio.to_thread(client.ask,'status',('123:old','monkey'))
+                self.assertFalse(caught.exception.retryable)
                 self.assertEqual(runtime.broker.calls_started,before)
+                # A scene transition before admission may retry, without model,
+                # wake or action side effects. Resume admits the request once.
+                with patch.object(runtime,'question_scene_blocked',return_value=True):
+                    with self.assertRaises(ChatNotSubmitted) as caught:
+                        await asyncio.to_thread(client.ask,'status',model.identity)
+                self.assertTrue(caught.exception.retryable)
+                self.assertEqual(runtime.broker.calls_started,before)
+                await asyncio.to_thread(client.ask,'status',model.identity)
+                self.assertEqual(runtime.broker.calls_started,before+1)
             finally:
                 await asyncio.to_thread(server.shutdown);server.server_close();thread.join(2)
                 await runtime.close()

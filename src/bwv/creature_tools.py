@@ -42,6 +42,13 @@ inspect_surrounding pages through the 360-unit inspection area; ticks summarize
 find_objects pages through known objects independently of action compatibility.
 find_targets finds action-compatible objects for a goal: action=eat, type=null
 or food_source considers all available food sources, not only piles.
+find_targets also accepts offset; follow next_offset when more candidates remain.
+An incomplete search or lookup failure does not establish that no target exists.
+unavailable_targets preserves engine pickup rejections and their reasons; these
+are not usable action targets. Search continues past them for eligible objects.
+Unfamiliar objects remain inspectable as type=object. engine_class is a technical
+label, not proof of what an object does or whether you can pick it up or eat it.
+Use actual returned capabilities; do not describe these labels as machine data in speech.
 Known objects come from creature beliefs and nearby observed portal landmarks,
 not a census of the whole island.
 center=god_hand changes the search origin, not who acts. distance is
@@ -144,7 +151,7 @@ def schema(name, description, properties=None):
 
 CATALOG={s['name']:s for s in (
     schema('inspect_self','Detailed body (Damage, Hunger and Tiredness are integer percentages from 0 to 100; higher is worse), separate native motivations, sourced traits, holding, native activity, training, all miracle learning and the current island gods.'),
-    schema('inspect_object','Available details of one known or held object by object_id, including creature owner, linked town ownership/belief, or scaffolding count, size and current building previews. Also accepts a known town_id or god_id to inspect that town or god, including alliance, alignment, registered creature and observed hand position. Does not act or create an action target.',
+    schema('inspect_object','Available details of one known or held object by object_id, including creature owner, linked town ownership/belief and storage-flag needs (also through storage buildings), or scaffolding count, size and current building previews. Also accepts a known town_id or god_id to inspect that town or god, including alliance, alignment, registered creature and observed hand position. Does not act or create an action target.',
            {'object_id':{'type':'string','minLength':1,'maxLength':96}}),
     schema('find_objects','Paginate all observed known objects, before action-target sampling. Search type or species. Returns object IDs, not action target tokens.',
            {'kind':{'type':['string','null'],'maxLength':64},
@@ -161,7 +168,7 @@ CATALOG={s['name']:s for s in (
                       'description':'Concise memory to keep: a supported lesson, preference, goal or useful place.'},
             'memory_id':{'type':['string','null'],'minLength':1,'maxLength':64,
                          'description':'Existing memory ID to replace; null adds a new memory.'}}),
-    schema('remove_memory','Delete exactly one saved memory by its current memory ID. Does not erase conversation history.',
+    schema('forget_memory','Delete exactly one saved memory by its current memory ID. Does not erase conversation history.',
            {'memory_id':{'type':'string','minLength':1,'maxLength':64}}),
 )}
 
@@ -397,7 +404,7 @@ class CreatureToolSession:
 
     def definitions(self):
         result = [deepcopy(s) for name,s in CATALOG.items()
-                  if name not in ('update_memory','remove_memory') or self.memory is not None]
+                  if name not in ('update_memory','forget_memory') or self.memory is not None]
         if self.action_candidates:result.append(deepcopy(ACTION_TOOL))
         return result
 

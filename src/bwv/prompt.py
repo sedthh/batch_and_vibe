@@ -50,6 +50,7 @@ SYSTEM = build_system()
 
 
 NEARBY_KEYS = {
+    'object': 'other_objects_nearby',
     'vortex': 'vortices_nearby', 'teleport': 'teleports_nearby',
     'toy': 'toys_nearby', 'mushroom': 'mushrooms_nearby', 'bonfire': 'bonfires_nearby',
     'scaffolding': 'scaffolding_nearby', 'debris': 'debris_pieces_nearby',
@@ -208,7 +209,7 @@ def _material(request, summary, *, settings=None) -> CreaturePrompt:
         profiles=creature_summary(asdict(o) for o in objects if o.kind=='creature')
         if profiles:nearby['other_creatures']=profiles
         from .vortex import portal_summary
-        portals=portal_summary(asdict(o) for o in objects)
+        portals=portal_summary(asdict(o) for o in objects if o.kind in ('vortex','teleport'))
         if portals:nearby['portals']=portals
         if nearby:context[key]=nearby
     if summary:

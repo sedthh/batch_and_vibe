@@ -59,11 +59,11 @@ int main() {
     for(unsigned value:{17u,18u,19u,20u}) {
         subtype=value;assert(object_kind(123,mushroom,mushroom_data)==(value==18 || value==19?26u:0u));
     }
-    assert((all_object_kinds&(1u<<26)) && (portable_object_kinds&(1u<<26)));
+    assert(all_object_kinds&(1u<<26));
     assert(!std::strcmp(throw_kind_name(26),"mushroom"));
     auto bonfire=[](uintptr_t p,const char* name){return p==123 && !std::strcmp(name,".?AVBonfire@@");};
     assert(object_kind(123,bonfire,data)==27 && object_kind(0,bonfire,data)==0);
-    assert((all_object_kinds&(1u<<27)) && !(portable_object_kinds&(1u<<27)));
+    assert(all_object_kinds&(1u<<27));
     assert(!std::strcmp(throw_kind_name(27),"bonfire"));
     KnownTargets fires;fires.add({123,456,789,27,20});
     assert(fires.select(all_object_kinds,destinations)==1 && destinations[0].kind==27);
@@ -85,13 +85,31 @@ int main() {
     assert(hand_found && hand_count<=known_target_capacity);
     for(unsigned kind=16;kind<=25;++kind) {
         assert(all_object_kinds&(1u<<kind));
-        assert(!(portable_object_kinds&(1u<<kind)));
         assert(std::strcmp(throw_kind_name(kind),"unknown"));
     }
     auto pig=[](uintptr_t p,const char* name){return p==123 && !std::strcmp(name,".?AVPig@@");};
     auto puzzle=[](uintptr_t,const char* name){return !std::strcmp(name,".?AVPuzzleCow@@");};
     assert(animal_object(123,pig) && !animal_object(0,pig) && !animal_object(123,puzzle));
-    assert(!(portable_object_kinds & (1u<<14)) && !(portable_object_kinds & (1u<<15)));
+    // Every world category can reach engine pickup eligibility, including
+    // unfamiliar objects. The category itself never decides portability.
+    assert(!std::strcmp(throw_kind_name(29),"object"));
+    KnownTargets broad;broad.focus_object=123;
+    broad.add({123,456,789,28,20});
+    assert(broad.select_nearby_or_focused(all_object_kinds,destinations)==1);
+    assert(destinations[0].kind==28);
+    NearbyTargets ordered;
+    ordered.add({1,11,21,1,1});ordered.add({2,12,22,2,2});
+    ordered.add({3,13,23,8,5});ordered.add({4,14,24,11,10});
+    ordered.add({5,15,25,16,15});ordered.add({6,16,26,5,20});
+    ordered.add({7,17,27,29,50,false,1});
+    ordered.add({8,18,28,7,100}); // Toys first, even beyond other objects.
+    ThrowPoint dead{9,19,29,3,110};dead.person_state=15;ordered.add(dead);
+    ordered.add({10,20,30,26,90}); // Mushrooms among resources.
+    ordered.add({11,21,31,28,1}); // Scaffolding after resources, despite proximity.
+    ordered.add({12,22,32,29,1});
+    assert(ordered.select(all_object_kinds,destinations)==12);
+    const uintptr_t order[]={8,7,6,9,5,4,3,10,11,12,1,2};
+    for(size_t i=0;i<12;++i)assert(destinations[i].object==order[i]);
     assert(!std::strcmp(throw_kind_name(14),"fishing_area"));
     assert(!std::strcmp(throw_kind_name(15),"animal_group"));
     ThrowTargets targets;

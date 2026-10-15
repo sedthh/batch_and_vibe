@@ -131,6 +131,10 @@ async def observations(pid: int, *, training: bool = False, control: bool = Fals
                         # Optional roster errors stay visible, but do not force a
                         # whole surroundings rescan on every fast control sample.
                         error = error or island_error
+                        if surroundings_signal is not None and surroundings_signal.context.town_need_read_errors:
+                            # Partial town details remain cached at the normal
+                            # cadence; do not rescan the island on every sample.
+                            error = error or 'town_needs:read_unavailable'
                         if surroundings_signal is not None and surroundings_signal.context.portal_read_errors:
                             # Keep optional portal diagnostics visible without
                             # turning an unreadable export into a tight rescan loop.

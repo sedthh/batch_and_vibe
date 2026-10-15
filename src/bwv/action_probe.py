@@ -23,6 +23,7 @@ from .dispatch import ActionOffer, DecisionDispatcher, DummyActionProvider, Acti
 COMMAND = struct.Struct('<IIQQQII')
 PRIORITY_FLAG = 0x80000000
 PLAYER_COMMAND_FLAG = 0x40000000
+NIGHT_PRIORITY_FLAG = 0x08000000
 
 
 def priority_state(state):
@@ -52,7 +53,8 @@ ACTIONS.update(cast_heal_self=17,cast_water_tree=18)
 ACTIONS.update({name:19 for name in WORLD_ACTIONS})
 ACTIONS['move_to_position']=20
 from .positions import map_bounds, checked_position
-PICKUP_KINDS=('tree','rock','villager','toy','food_pile','wood_pile','animal','miracle_bubble','mushroom')
+# Categories describe targets; the live engine decides whether they are pickable.
+PICKUP_KINDS=WORLD_KINDS[1:]
 
 
 def miracle_actions_available(probe):
@@ -231,7 +233,7 @@ class NativeActionAdapter:
     """Keep engine capability tokens private and bound to their original process."""
     actions = tuple(a for a in ACTIONS if a not in ('throw_held_at','pick_up','cast_water_tree','move_to_position') and a not in WORLD_ACTIONS)
     lifetime_seconds = 1
-    def __init__(self, pid, *, read=None, send=None, interrupt=False, pace=None, player_command=False):
+    def __init__(self, pid, *, read=None, send=None, interrupt=False, pace=None, player_command=False, night_priority=False):
         if type(pid) is not int or not 0 < pid <= 0xffffffff:
             raise ValueError('Invalid action process')
         self.pid = pid
@@ -240,6 +242,7 @@ class NativeActionAdapter:
         self.send=send or submit
         self.pace=pace
         self.player_command=player_command
+        self.night_priority=night_priority
 
     def _identity(self, state):
         probe = state['action_probe']
@@ -274,7 +277,10 @@ class NativeActionAdapter:
             return packet
         result=bytearray(packet)
         version=struct.unpack_from('<I',result,4)[0]
-        struct.pack_into('<I',result,4,version|PLAYER_COMMAND_FLAG)
+        flags=PLAYER_COMMAND_FLAG
+        if self.night_priority and contract.get('night_priority_version')==1:
+            flags|=NIGHT_PRIORITY_FLAG
+        struct.pack_into('<I',result,4,version|flags)
         return bytes(result)
 
     def _available(self, state, action):
@@ -543,7 +549,7 @@ def submit(pid, packet):
     if type(pid) is not int or not 0 < pid <= 0xffffffff or type(packet) is not bytes or len(packet) not in (COMMAND.size, COMMAND.size+8):
         raise ValueError('Invalid action experiment request')
     header=COMMAND.unpack(packet[:COMMAND.size])
-    coordinate_packet=(header[1] & ~(PRIORITY_FLAG|PLAYER_COMMAND_FLAG|0x30000000))==11 and header[-2]==20
+    coordinate_packet=(header[1] & ~(PRIORITY_FLAG|PLAYER_COMMAND_FLAG|NIGHT_PRIORITY_FLAG|0x30000000))==11 and header[-2]==20
     if len(packet)!=(COMMAND.size+8 if coordinate_packet else COMMAND.size):
         raise ValueError('Action packet length does not match its protocol')
     kernel = ctypes.WinDLL('kernel32',use_last_error=True)

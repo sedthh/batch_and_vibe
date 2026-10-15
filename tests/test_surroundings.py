@@ -188,7 +188,8 @@ class SurroundingsTests(unittest.TestCase):
             memory.typed(info,b'.?AVGMobileStaticInfo@@',5)
             memory.put(info+0x120,subtype)
             objects=memory.sample().context.nearby_known_objects
-            self.assertEqual([o.kind for o in objects],['fence'] if subtype in (56,81,82) else [])
+            self.assertEqual([o.kind for o in objects],['fence'] if subtype in (56,81,82) else ['object'])
+            if subtype not in (56,81,82):self.assertEqual(objects[0].engine_class,'MobileStatic')
     def test_wildlife_and_fishing_locations_reach_compact_context(self):
         from bwv.animal_types import ANIMAL_TYPES
         from bwv.llm_context import summarize_context
@@ -227,14 +228,29 @@ class SurroundingsTests(unittest.TestCase):
         self.assertEqual(json.loads(prompt.context_json)['surroundings'], {'trees_nearby':1})
         self.assertNotIn(obj.object_id,prompt.context_json)
 
-    def test_far_self_and_unknown_objects_are_omitted(self):
-        for variant in ('far','self','unknown'):
+    def test_far_self_and_invalid_class_labels_are_omitted_from_summary(self):
+        for variant in ('far','self','invalid_class'):
             memory=NearbyMemory()
             if variant=='far':memory.bytes(memory.tree+0x14,struct.pack('<iif',65536*13,0,0))
             elif variant=='self':memory.put(memory.node+0x30,memory.creature)
-            else:memory.bytes(0x5104208,b'.?AVUnrecognized@@'.ljust(64,b'\0'))
+            else:memory.bytes(0x5104208,b'invalid/runtime/type'.ljust(64,b'\0'))
             with self.subTest(variant=variant):
                 self.assertEqual(memory.sample().context.nearby_known_objects,())
+
+    def test_unmapped_runtime_class_remains_inspectable(self):
+        memory=NearbyMemory()
+        memory.bytes(0x5104208,b'.?AVUnrecognized@@'.ljust(64,b'\0'))
+        obj,=memory.sample().context.nearby_known_objects
+        self.assertEqual((obj.kind,obj.engine_class),('object','Unrecognized'))
+
+    def test_unreadable_unmapped_object_does_not_disable_surroundings(self):
+        memory=NearbyMemory()
+        memory.bytes(0x5104208,b'.?AVUnrecognized@@'.ljust(64,b'\0'))
+        memory.bytes(memory.tree+0x14,struct.pack('<iif',65536,0,float('nan')))
+        context=memory.sample().context
+        self.assertTrue(context.available)
+        self.assertEqual(context.nearby_known_objects,())
+        self.assertEqual(context.detail_read_errors,1)
 
     def test_motion_does_not_restart_or_discard_a_surroundings_scan(self):
         memory=NearbyMemory()

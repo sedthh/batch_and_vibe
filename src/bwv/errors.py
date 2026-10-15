@@ -6,6 +6,14 @@ import time
 import traceback
 
 
+class ChatNotSubmitted(ValueError):
+    """Admission failed before a model call, wake or other question side effect."""
+    def __init__(self, *, retryable=True, reason='chat_unavailable'):
+        super().__init__(MESSAGES['chat_unavailable'])
+        self.retryable = retryable
+        self.reason = reason
+
+
 MESSAGES = {
     'fullscreen_overlay_unavailable':'LLM paused: use windowed or launcher borderless mode for creature chat',
     'game_display_unavailable':'LLM paused: game window is unavailable or minimized',

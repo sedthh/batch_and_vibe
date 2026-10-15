@@ -2,7 +2,7 @@
 
 
 class DetailRefresh:
-    def __init__(self, interval=1.0):
+    def __init__(self, interval=3.0):
         self.interval=interval
         self.requested=0
         self.completed=0

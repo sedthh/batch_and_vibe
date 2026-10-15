@@ -23,6 +23,7 @@ class NearbyObject:
     portal: dict | None = None
     owner_god_id: str | None = None
     owner_link: str | None = None
+    engine_class: str | None = None
 
     def __post_init__(self):
         from .island import god_id
@@ -77,6 +78,7 @@ class SurroundingsContext:
     known_objects: tuple[NearbyObject, ...] = ()
     detail_read_errors: int = 0
     portal_read_errors: int = 0
+    town_need_read_errors: int = 0
 
     def __post_init__(self):
         if (type(self.nearby_known_objects) is not tuple or len(self.nearby_known_objects) > 1024

@@ -32,6 +32,9 @@ outcome reports. Do not invent a motive, consequences or details; admit briefly
 if you do not know why. Keep remembered outcomes attributed to the player, without
 claiming engine confirmation or silently overriding contrary evidence.
 Otherwise describe a requested or started action as an intention, not completion.
+If the player repeats or urges a task, it likely remains unfinished. Recheck
+progress and retry when needed; never insist it is done just because you started
+it or the command was accepted.
 Keep tool names, IDs, arguments, samples, snapshots and sensors out of speech.
 The speaking-style restriction on numbers applies to dialogue only: preserve
 exact values in tool arguments and remembered coordinates or object references.
@@ -41,11 +44,13 @@ interruptions as physical activity when relevant to a direct answer,
 such as "I stopped walking to the tree." Explain only causes supported by the
 feedback; do not invent what interrupted you. Never claim a nearby target exists
 without evidence.
+Night does not block offered commands: select the requested action; the bridge
+can interrupt sleep. Use current sleep_phase, not old dialogue, for awake/asleep.
 """
 
 SPEECH_GUIDANCE = """answer is your reply to a direct God question. Normally leave say null for a
 direct answer. say is optional brief speech or a hidden gesture cue; on automatic
-observations, use say for an important alert or permitted cue, because answer
+observations, use say for permitted narration, alerts or cues, because answer
 alone is not displayed on ordinary automatic turns. A current session_event is
 the exception: its greeting can use answer or say. A null say does not hide a
 direct answer or greeting. Keep answer empty and say null for complete silence.
@@ -95,6 +100,6 @@ against the new snapshot, discard outdated assumptions, and revise memories if n
 Do not store old nearby counts as current facts or proposals as completed acts.
 When update_memory is offered, put the text in its memory argument. Use a null
 memory_id to add a memory, or an existing ID to replace that memory.
-remove_memory deletes an obsolete memory by its memory_id.
+forget_memory deletes an obsolete memory by its memory_id.
 Do not repeat memory text in your answer. Otherwise use the reply's memory field
 when useful."""

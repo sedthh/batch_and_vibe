@@ -38,8 +38,8 @@ int main() {
     p.update(1,200,changed,false,clear);assert(!p.active && writes==3);
 
     // Origin and pace flags survive protocol decoding and the normal scene gate.
-    Command c;c.version=11|Command::interrupt_flag|Command::player_command_flag|0x20000000u;
-    assert(c.protocol()==11 && c.player_command() && c.interrupts() && c.pace()==Pace::run);
+    Command c;c.version=11|Command::interrupt_flag|Command::player_command_flag|Command::night_priority_flag|0x20000000u;
+    assert(c.protocol()==11 && c.player_command() && c.night_priority() && c.interrupts() && c.pace()==Pace::run);
     Policy policy(true);policy.observe(1,42,true,"",100);
     c={};c.version=1|Command::player_command_flag;
     c.epoch=policy.epoch;c.generation=policy.generation;c.offered_at=100;
@@ -48,6 +48,11 @@ int main() {
     c.generation=blocked.generation;assert(!blocked.queue(c,101));
     Policy legacy;legacy.observe(1,42,true,"",100);
     c.generation=legacy.generation;assert(!legacy.queue(c,101));
+    Policy night_policy(true);night_policy.observe(1,42,true,"",100);
+    c.generation=night_policy.generation;c.version=1|Command::night_priority_flag;
+    assert(!night_policy.queue(c,101)); // night cannot opt automatic ticks into player priority
+    c.version|=Command::player_command_flag;
+    assert(night_policy.queue(c,101));assert(night_policy.dispatch(c,102));
     // A second player command supersedes the first; it gets its own seven
     // seconds from dispatch, not the old deadline plus seven more seconds.
     CommandPriority replacement;unsigned replacements=0;
@@ -60,5 +65,17 @@ int main() {
     assert(replacement.active && replacements==1 && replacement.remaining(7100)==1000);
     replacement.update(1,8100,second,false,release);
     assert(!replacement.active && replacements==2);
-    std::puts("Command priority: seven-second expiry, native release, control takeover, identity and protocol passed");
+    replacement.begin(1,100,r,true);
+    replacement.update(1,7100,r,false,release);
+    assert(replacement.active && replacement.window_ms==10000 && replacement.remaining(7100)==3000);
+    replacement.update(1,10100,r,false,release);
+    assert(!replacement.active && replacements==3);
+    replacement.begin(1,100,r,true);
+    replacement.update(1,200,r,true,release);
+    assert(!replacement.active && replacements==4); // night still yields to control takeover
+    replacement.begin(1,100,r,true);
+    replacement.release(1,r,"replaced",release);
+    replacement.begin(1,1100,second); // next daytime request gets seven seconds, not ten
+    assert(replacement.window_ms==7000 && replacement.remaining(1100)==7000);
+    std::puts("Command priority: day/night expiry, replacement, native release, control takeover, identity and protocol passed");
 }

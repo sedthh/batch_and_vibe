@@ -9,10 +9,8 @@ inline constexpr size_t known_target_capacity=2*object_target_capacity+1;
 inline constexpr size_t world_target_capacity=2048;
 inline constexpr double nearby_target_distance=120;
 inline constexpr double known_target_distance=20000;
-inline constexpr unsigned target_kind_count=28;
+inline constexpr unsigned target_kind_count=29;
 inline constexpr uint32_t all_object_kinds=(1u<<(target_kind_count+1))-2;
-inline constexpr uint32_t portable_object_kinds=(1u<<1)|(1u<<2)|(1u<<3)|(1u<<7)
-    |(1u<<8)|(1u<<9)|(1u<<10)|(1u<<11)|(1u<<26);
 // Hurl takes the destination as the primary action belief and the projectile
 // as the secondary action belief. ThrowObjectInHand instead reads the nearest
 // god hand's position; it is not the targetless discard animation.
@@ -30,7 +28,23 @@ struct ThrowPoint {
     int pickup_possible=-1;
     const char* pickup_reason=nullptr;
     uint32_t bubble_spell=0;
+    bool position_only=false;
+    uint8_t person_state=0;
+    bool important_person=false;
 };
+inline unsigned target_importance(const ThrowPoint& p) {
+    if(p.kind==7)return 0;
+    if(p.on_fire==1)return 1;
+    if(p.kind==5)return 2;
+    if(p.kind==3 && p.person_state>=13 && p.person_state<=15)return 3;
+    if(p.kind==3 && p.important_person)return 4;
+    if(p.kind==3 || p.kind==6 || p.kind==21 || p.kind==22)return 5;
+    if(p.kind==4 || p.kind==12 || (p.kind>=16 && p.kind<=24))return 6;
+    if(p.kind==11 || p.kind==13)return 7;
+    if(p.kind==8 || p.kind==9 || p.kind==10 || p.kind==14 || p.kind==15 || p.kind==26)return 8;
+    if(p.kind==28)return 9;
+    return p.kind==1 || p.kind==2 ? 11 : 10;
+}
 inline bool context_position(const ThrowPoint& point) {
     const bool kind=point.kind==4 || point.kind==5 || point.kind==6
         || (point.kind>=16 && point.kind<=24);
@@ -48,6 +62,7 @@ struct NearbyTargets {
     size_t counts[target_kind_count+1]{};
     double distance(const ThrowPoint& p) const {return around_hand?p.distance_to_god_hand:p.distance;}
     bool before(const ThrowPoint& a,const ThrowPoint& b) const {
+        if(target_importance(a)!=target_importance(b))return target_importance(a)<target_importance(b);
         return distance(a)<distance(b) || (distance(a)==distance(b) && a.object<b.object);
     }
     void add(const ThrowPoint& p,double maximum=nearby_target_distance) {
@@ -63,17 +78,20 @@ struct NearbyTargets {
         bucket[pos]=p;
     }
     size_t select(uint32_t kinds,ThrowPoint* out,size_t limit=object_target_capacity) const {
-        size_t n=0;
-        for(size_t rank=0;rank<per_kind && n<limit;++rank) {
-            ThrowPoint round[target_kind_count]{};size_t count=0;
+        size_t n=0,cursors[target_kind_count+1]{};
+        while(n<limit) {
+            unsigned best=0;
             for(unsigned kind=1;kind<=target_kind_count;++kind) {
-                if(!(kinds&(1u<<kind)) || counts[kind]<=rank)continue;
-                const auto& p=points[kind][rank];size_t pos=0;
-                while(pos<count && before(round[pos],p))++pos;
-                for(size_t i=count;i>pos;--i)round[i]=round[i-1];
-                round[pos]=p;++count;
+                if(!(kinds&(1u<<kind)) || cursors[kind]>=counts[kind])continue;
+                const auto& p=points[kind][cursors[kind]];
+                if(!best) {best=kind;continue;}
+                const auto& b=points[best][cursors[best]];
+                const auto priority=target_importance(p),other=target_importance(b);
+                if(priority<other || (priority==other && (cursors[kind]<cursors[best]
+                        || (cursors[kind]==cursors[best] && before(p,b)))))best=kind;
             }
-            for(size_t i=0;i<count && n<limit;++i)out[n++]=round[i];
+            if(!best)break;
+            out[n++]=points[best][cursors[best]++];
         }
         return n;
     }
@@ -121,7 +139,7 @@ struct KnownTargets {
         }
         return total;
     }
-    size_t select_portable(uint32_t kinds,ThrowPoint* out) const {
+    size_t select_nearby_or_focused(uint32_t kinds,ThrowPoint* out) const {
         const bool focused=focus.object && (kinds&(1u<<focus.kind));
         size_t n=nearby.select(kinds,out,object_target_capacity-(focused?1:0));
         if(focused) {
@@ -168,7 +186,7 @@ inline const char* throw_kind_name(unsigned kind) {
     const char* names[]={"unknown","tree","rock","villager","house","creature","temple","toy",
         "food_pile","wood_pile","animal","miracle_bubble","field","miracle_dispenser",
         "fishing_area","animal_group","storage","nursery","cemetery","workshop",
-        "wonder","town_centre","totem","windmill","worship_site","fence","mushroom","bonfire","scaffolding"};
+        "wonder","town_centre","totem","windmill","worship_site","fence","mushroom","bonfire","scaffolding","object"};
     return kind<=target_kind_count?names[kind]:"unknown";
 }
 }

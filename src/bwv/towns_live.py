@@ -25,6 +25,8 @@ class TownSampler:
         self.cache={}
         self.failed=set()
         self.checks=[]
+        self.need_errors=0
+        self.needs_layout=None
 
     def for_object(self,obj):
         r=self.reader
@@ -90,7 +92,20 @@ class TownSampler:
         # belief. Matching this reference does not itself establish conversion.
         reference=values[owner] if owner is not None and owner!=own else None
         identity=hashlib.sha256(f'{self.session}:town:{town}'.encode()).hexdigest()[:24]
+        # Optional demand readings must not discard ownership or nearby objects.
+        # The town cache also shares these readings across linked buildings.
+        needs=None
+        try:
+            from .town_needs_live import GET_RAW_DESIRE, GET_RAW_DESIRE_CODE, FLAG_LAYOUT_CODE, read_town_needs
+            if self.needs_layout is None:
+                self.needs_layout=False
+                self.needs_layout=all(r.read(address,len(code))==code
+                    for address,code in ((GET_RAW_DESIRE,GET_RAW_DESIRE_CODE),*FLAG_LAYOUT_CODE))
+            if not self.needs_layout:raise ValueError('Town needs layout unverified')
+            needs=read_town_needs(r,town)
+        except (OSError,ValueError):
+            self.need_errors+=1
         return TownContext(identity,TRIBES[tribe] if tribe<len(TRIBES) else None,
             control,f'god_{owner}' if owner is not None and owner!=neutral else None,
             tuple(beliefs),values[neutral],caps[own],reference,
-            max(0,reference-values[own]) if reference is not None else None),checks
+            max(0,reference-values[own]) if reference is not None else None,needs),checks

@@ -36,8 +36,11 @@ class HotkeyThreadTests(TestCase):
         window.entry.delete.assert_not_called()
         window.entry.configure.assert_called_with(state='disabled')
         window.win.u.ShowWindow.assert_called_with(2,0)
+        window.render()
+        window.win.u.ShowWindow.assert_called_once_with(2,0)
+        window.entry.configure.assert_called_once_with(state='disabled')
 
-    def test_read_gap_keeps_input_and_banner_visible_but_send_disabled(self):
+    def test_read_gap_keeps_input_banner_and_send_available_for_queued_delivery(self):
         window=object.__new__(OverlayWindow)
         window.model=Mock();window.model.can_send.return_value=False
         window.model.can_show.return_value=True
@@ -57,9 +60,29 @@ class HotkeyThreadTests(TestCase):
         window.render()
         window.win.u.ShowWindow.assert_not_called()
         window.entry.configure.assert_called_with(state='normal')
-        window.send.configure.assert_called_with(state='disabled')
+        window.send.configure.assert_any_call(state='normal')
         window.entry.delete.assert_not_called()
         window.diagnostics.assert_called_with(True)
+        # An unchanged minute of polling must not repeatedly resize/restack the
+        # layered window or ask Tk to repaint identical controls over the game.
+        for _ in range(600):window.render()
+        window.win.u.SetWindowPos.assert_called_once()
+        window.heading.configure.assert_called_once()
+        window.indicator.configure.assert_called_once()
+        window.message_box.pack.assert_called_once()
+        window.message_scroll.pack.assert_called_once()
+        window.form.pack.assert_called_once()
+        # Moving the game, returning from another app, and scene recovery still
+        # reposition/show the overlay even when the message has not changed.
+        window.win.rect.return_value=(20,30,820,630)
+        window.render()
+        self.assertEqual(window.win.u.SetWindowPos.call_count,2)
+        window.win.u.GetForegroundWindow.return_value=3
+        window.render();window.render()
+        window.win.u.ShowWindow.assert_called_once_with(2,0)
+        window.win.u.GetForegroundWindow.return_value=1
+        window.render()
+        self.assertEqual(window.win.u.SetWindowPos.call_count,3)
         # Full long replies survive both modes; routine polling must not reset
         # the scroll position while the user is reading the same message.
         reply='A long reply. '*80+'Last line.'
@@ -73,6 +96,15 @@ class HotkeyThreadTests(TestCase):
         window.expanded=True;window.render();window.render()
         window.message.yview_moveto.assert_not_called()
         window.message_scroll.pack.assert_called_with(side='right',fill='y',before=window.message)
+
+    def test_unchanged_window_style_does_not_reset_layered_surface(self):
+        win=object.__new__(Windows)
+        win.get_long=Mock(return_value=0x80|0x80000|0x08000000)
+        win.set_long=Mock()
+        for _ in range(600):win.own_style(1,False,readable=True)
+        win.set_long.assert_not_called()
+        win.own_style(1,True,readable=True)
+        win.set_long.assert_called_once_with(1,-20,0x80|0x80000)
 
     def test_scene_gap_preserves_draft_but_new_recipient_clears_it(self):
         window=object.__new__(OverlayWindow)

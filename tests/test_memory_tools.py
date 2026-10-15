@@ -46,7 +46,7 @@ class MemoryToolTests(TestCase):
             self.assertIn('Wire rules',refreshed)
             self.assertEqual(memory.system_prompt(refreshed),refreshed)
 
-    def test_add_update_remove_restart_migration_and_history_separation(self):
+    def test_add_update_forget_restart_migration_and_history_separation(self):
         with TemporaryDirectory() as directory:
             path=Path(directory)/'memory.json'
             path.write_text(json.dumps({'version':1,'notes':'Old belief','recent_pairs':[]}))
@@ -57,11 +57,11 @@ class MemoryToolTests(TestCase):
             ident=added['memory_id']
             self.assertEqual(session.call('update_memory',{'memory':'A new lesson','memory_id':None})['status'],'already_remembered')
             session.call('update_memory',{'memory':'A corrected lesson','memory_id':ident})
-            session.call('remove_memory',{'memory_id':legacy})
+            session.call('forget_memory',{'memory_id':legacy})
             loaded=ConversationMemory(path=path)
             self.assertEqual(loaded.snapshot()['entries'],[{'id':ident,'text':'A corrected lesson'}])
             self.assertEqual(loaded.notes,'A corrected lesson')
-            self.assertEqual(session.call('remove_memory',{'memory_id':'missing'})['status'],'memory_not_found')
+            self.assertEqual(session.call('forget_memory',{'memory_id':'missing'})['status'],'memory_not_found')
             loaded.record({'snapshot':{}},'Hi',{'candidate':None})
             messages=loaded.messages('System',{'god_question':'Hello'})
             self.assertEqual(messages[0]['content'].count('A corrected lesson'),1)

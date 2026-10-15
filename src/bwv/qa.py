@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
+from dataclasses import fields, is_dataclass
 from collections import deque
+from copy import deepcopy
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -20,6 +21,7 @@ from .prompt import preview_prompt
 from .watch import observations
 from .updates import ContextUpdates
 from .conversation import current_prompt, question_unavailable, ConversationMemory, CreatureSpeech
+from .errors import ChatNotSubmitted
 from .memory_store import default_memory_path
 from .llm_context import summarize_context
 from .model_projection import model_snapshot, model_turn
@@ -28,12 +30,16 @@ from .sampling import DetailRefresh
 
 def _debug_value(value):
     """Represent unavailable numeric sentinels as JSON null, only for display."""
-    if isinstance(value, float) and not math.isfinite(value):
-        return None
+    if type(value) in (str, int, bool, type(None)):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
     if isinstance(value, dict):
         return {key: _debug_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return type(value)(_debug_value(item) for item in value)
+    if is_dataclass(value) and not isinstance(value, type):
+        return {field.name: _debug_value(getattr(value, field.name)) for field in fields(value)}
     return value
 
 
@@ -54,6 +60,8 @@ class Inspector:
         self._observation = None
         self._signature = None
         self._number = 0
+        self._detail_encoding = {}
+        self._encoding_identity = None
         self.detail_refresh = DetailRefresh()
         self._lock = threading.Lock()
         # A conversation runtime can share its actual state here. The standalone
@@ -87,18 +95,37 @@ class Inspector:
                                            if type(getattr(observation, name)) is not bool]},
             'diagnostics': {'error': error, 'source_age_ms': state.get('source_age_ms'),
                 'detailed_sensors': state.get('detailed_sensors'),
+                'bridge_performance': state.get('bridge_performance'),
                 'action_probe': state.get('action_probe'),
                 'paused': observation.paused, 'cutscene': observation.cutscene,
                 'in_temple': observation.in_temple,
                 'experience_validation': observation.experience.validation,
                 'script_camera_owned': camera.script_owned if camera else None},
-            'observation': asdict(observation),
             'status_updates': scheduled,
             'prompt': {'system': prompt.system, 'context': json.loads(prompt.context_json)},
         }
         # An unavailable source timestamp can be -inf during startup or loss of
         # connection. Keep the original observation for gating; JSON has no inf.
         frame = _debug_value(frame)
+        # The watcher replaces these immutable detail snapshots on refresh and
+        # shares them between fast observations. Encode each once, retaining at
+        # most one version per field. Published frames are read-only internally.
+        identity = (observation.session, observation.creature_id)
+        if identity != self._encoding_identity:
+            self._detail_encoding.clear()
+            self._encoding_identity = identity
+        encoded = {}
+        for field in fields(observation):
+            value = getattr(observation, field.name)
+            if field.name in ('surroundings', 'environment', 'island'):
+                previous = self._detail_encoding.get(field.name)
+                if previous is None or previous[0] is not value:
+                    previous = (value, _debug_value(value))
+                    self._detail_encoding[field.name] = previous
+                encoded[field.name] = previous[1]
+            else:
+                encoded[field.name] = _debug_value(value)
+        frame['observation'] = encoded
         frame['model_context'] = model_snapshot(summarize_context(
             frame['prompt']['context'], frame['observation']))
         update = scheduled.get('last_update')
@@ -137,7 +164,7 @@ class Inspector:
             if capture_history:self._next_history_at = now + self.history_interval
 
     def latest_frame(self):
-        """Internal readers need the current frame, not the debugger history index."""
+        """Internal read-only view; published frames are replaced, never edited."""
         with self._lock:
             return self.latest
 
@@ -163,6 +190,29 @@ class Inspector:
                  'reasons': f['reasons']} for f in reversed(self.frames)],
                 'history_retention':{'frames':len(self.frames),'bytes':self.retained_bytes,
                                      'byte_limit':self.history_bytes}}
+
+    def debug_payload(self, sections=()):
+        """The default browser view needs summaries, not the raw engine catalog."""
+        sections=frozenset(sections)
+        if not sections <= DEBUG_SECTIONS:raise ValueError('Unknown debug section')
+        if 'full' in sections:return self.payload()
+        with self._lock:
+            frame=self.latest
+            if frame is not None:
+                frame={k:frame[k] for k in ('id','recorded_at','gate','question_unavailable',
+                    'speech','model_context','model_update') if k in frame}
+                frame['diagnostics']={'error':self.latest.get('diagnostics',{}).get('error')}
+                frame['observation']={'connected':self.latest.get('observation',{}).get('connected')}
+                updates=self.latest.get('status_updates',{})
+                frame['status_updates']={k:v for k,v in updates.items() if k!='last_update'}
+                last=updates.get('last_update')
+                frame['status_updates']['last_update']=({k:last[k] for k in ('number','trigger') if k in last}
+                                                        if last else None)
+                if 'history' in sections:frame['memory']=self.latest.get('memory')
+            return deepcopy({'current':frame,'history':[
+                {k:f[k] for k in ('id','recorded_at','reasons')} for f in reversed(self.frames)],
+                'history_retention':{'frames':len(self.frames),'bytes':self.retained_bytes,
+                                     'byte_limit':self.history_bytes}})
 
 
 def make_server(inspector, port=0, token=None, *, post_handlers=None, page_name='qa.html', debug=False,
@@ -224,6 +274,13 @@ def make_server(inspector, port=0, token=None, *, post_handlers=None, page_name=
                 self.connection.settimeout(2)
                 payload = json.loads(self.rfile.read(length))
                 result = route(payload)
+            except ChatNotSubmitted as error:
+                self.send_response(409)
+                self.send_header('X-BWV-Chat-Not-Submitted','retry' if error.retryable else 'stop')
+                self.send_header('Content-Length','0')
+                self.send_header('Cache-Control','no-store')
+                self.end_headers()
+                return
             except (ValueError, OSError):
                 self.send_error(400, 'Question unavailable or invalid')
                 return
