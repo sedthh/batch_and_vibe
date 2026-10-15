@@ -19,7 +19,10 @@
 #include "pickup_eligibility.h"
 #include "catalog_refresh.h"
 #include "type_name_cache.h"
+#include "object_type_view.h"
+#include "object_hierarchy.h"
 #include "pe_signature_windows.h"
+#include "work_timing.h"
 #include <wincrypt.h>
 #include <cmath>
 #include <atomic>
@@ -112,6 +115,9 @@ const char* outcome = "not_executed";
 std::atomic<bool> self_catalog_verified{false};
 uint32_t action_timeout_ms=10000;
 CommandPriority command_priority;
+bool observation_active=false;
+bwv_observer::WorkTiming inspection_work,catalog_work;
+bwv_observer::WorkTiming target_pool_work,pickup_check_work,recipe_work,legacy_target_work;
 
 bool range(uintptr_t address, size_t size) {
     if (address < 0x10000 || !size || address+size < address || address+size > 0x80000000) return false;
@@ -126,14 +132,16 @@ template<class T> bool read(uintptr_t address, T& value) {
 }
 uintptr_t word(uintptr_t address) { uint32_t value = 0; read(address,value); return value; }
 thread_local TypeNameCache* type_names=nullptr;
+thread_local ObjectBaseCache* object_bases=nullptr;
 struct ScopedTypeNames {
     TypeNameCache cache;
+    ObjectBaseCache base_cache;
     TypeNameCache* previous=type_names;
-    ScopedTypeNames(){type_names=&cache;}
-    ~ScopedTypeNames(){type_names=previous;}
+    ObjectBaseCache* previous_bases=object_bases;
+    ScopedTypeNames(){type_names=&cache;object_bases=&base_cache;}
+    ~ScopedTypeNames(){type_names=previous;object_bases=previous_bases;}
 };
-bool type(uintptr_t object, const char* expected) {
-    const uintptr_t table = word(object);
+bool type_table(uintptr_t table, const char* expected) {
     const auto fallback=[](uintptr_t vtable,const char* name) {
         const uintptr_t descriptor=word(word(vtable-4)+12);
         const size_t length=std::strlen(name)+1;
@@ -145,6 +153,16 @@ bool type(uintptr_t object, const char* expected) {
         if(!range(descriptor+8,size))return false;
         std::memcpy(name,reinterpret_cast<void*>(descriptor+8),size);return true;
     },fallback);
+}
+bool type(uintptr_t object,const char* expected) {return type_table(word(object),expected);}
+unsigned world_bases(uintptr_t object) {
+    const auto load=[](uintptr_t table) {
+        return world_object_bases(table,word,[](uintptr_t address,const char* name) {
+            const auto length=std::strlen(name)+1;
+            return range(address,length) && !std::memcmp(reinterpret_cast<void*>(address),name,length);
+        });
+    };
+    return object_bases?object_bases->get(word(object),load):load(word(object));
 }
 
 }
@@ -540,13 +558,32 @@ Observation inspect() {
     return obs;
 }
 
-void tick(uint64_t epoch) {
+void tick(uint64_t epoch,bool observing) {
     if (!supported || !transport_ready) return;
     if (!game_thread) game_thread=GetCurrentThreadId();
     if (game_thread!=GetCurrentThreadId()) return;
+    if(!observing && !observation_active)return;
     ScopedTypeNames cached_class_metadata;
     const uint64_t now=GetTickCount64();
-    const Observation obs=inspect();
+    const Observation obs=[&](){bwv_observer::TimedWork measured(inspection_work);return inspect();}();
+    if(!observing) {
+        if(!TryAcquireSRWLockExclusive(&lock))return;
+        // Release only our still-owned temporary controls. An already-started
+        // native action may finish normally; no replacement agenda is sent.
+        command_priority.release(epoch,inspect_command_priority(obs.creature),
+                                 "observer_disconnected",clear_command_priority);
+        movement_pace.release(epoch,obs.creature,read_pace,set_pace);
+        policy.observe(epoch,obs.creature,false,"observer_disconnected",now);
+        if(has_pending) {
+            has_pending=false;policy.phase=Phase::rejected;++policy.generation;policy.revoke_bound();
+            outcome="observer_disconnected";result_phase="rejected";
+        }
+        catalog_refresh.initialized=false;
+        observation_active=false;
+        ReleaseSRWLockExclusive(&lock);
+        return;
+    }
+    observation_active=true;
     if (epoch!=interrupted_epoch || obs.creature!=last_creature || obs.mental!=last_mental || obs.tick<last_tick) {
         stable_since=0; last_advanced=0;
         pickup_checked_at=0;
@@ -583,10 +620,14 @@ void tick(uint64_t epoch) {
     const bool refresh_catalog=catalog_refresh.due(now,epoch,obs.creature,obs.mental,
         held_target.token(),focus,obs.tick,!blocked,has_pending);
     if (refresh_catalog) {
+    bwv_observer::TimedWork measured_catalog(catalog_work);
     KnownTargets known;
     known.focus_object=focus;
-    inspect_target_pool(obs.creature,obs.mental,obs.held,known,
-        obs.movement.verified,obs.movement.hand_x,obs.movement.hand_z);
+    {
+        bwv_observer::TimedWork measured_pool(target_pool_work);
+        inspect_target_pool(obs.creature,obs.mental,obs.held,known,
+            obs.movement.verified,obs.movement.hand_x,obs.movement.hand_z);
+    }
     lookup_observed_object=known.focus.object;
     if(known.focus.kind==11) {
         const auto bubble=inspect_held_miracle(known.focus.object,type,word,
@@ -608,14 +649,15 @@ void tick(uint64_t epoch) {
     // targets even when the objects and their beliefs are unchanged. Policy
     // action masks and game-thread dispatch still enforce execution locks.
     const auto throw_count=throw_verified && obs.held
-        ?known.select_portable(all_object_kinds,throw_points):0;
+        ?known.select_nearby_or_focused(all_object_kinds,throw_points):0;
     throw_targets.observe(throw_points,throw_count,held_target.token(),epoch,obs.creature);
     for(size_t i=0;i<ThrowTargets::capacity;++i) policy.throw_tokens[i]=throw_targets.entries[i].token;
     pickup_verified=pickup_contract();
     ThrowPoint pickup_points[ThrowTargets::capacity]{};
     const auto pickup_count=pickup_verified
-        ?known.select_portable(portable_object_kinds,pickup_points):0;
+        ?known.select_nearby_or_focused(all_object_kinds,pickup_points):0;
     if(!blocked) {
+        bwv_observer::TimedWork measured_pickup(pickup_check_work);
         const bool refresh=!pickup_checked_at || now-pickup_checked_at>=500;
         for(size_t i=0;i<pickup_count;++i) {
             auto& point=pickup_points[i];bool cached=false;
@@ -632,6 +674,7 @@ void tick(uint64_t epoch) {
     }
     pickup_targets.observe(pickup_points,pickup_count,1,epoch,obs.creature);
     for(size_t i=0;i<ThrowTargets::capacity;++i) policy.pickup_tokens[i]=pickup_targets.entries[i].token;
+    bwv_observer::TimedWork measured_recipes(recipe_work);
     miracle_verified=true;learned_miracle_mask=0;
     for(const auto& r:miracle_recipes) {
         if(!miracle_contract(r)) miracle_verified=false;
@@ -679,6 +722,7 @@ void tick(uint64_t epoch) {
 #ifdef BWV_HELD_ACTIONS
     if (refresh_catalog) {
 #endif
+    bwv_observer::TimedWork measured_legacy(legacy_target_work);
     object_target_validation="creature_not_eligible";
     const ObjectPoint point=!blocked && (obs.actions&1)
         ? inspect_object_target(obs.creature,obs.mental,object_target.point.object) : ObjectPoint{};
@@ -1043,7 +1087,7 @@ void tick(uint64_t epoch) {
                 using ForceAgenda=void(__thiscall*)(void*,int,void*,int,void*,void*);
                 reinterpret_cast<ForceAgenda>(0x4C4580)(creature,pending.action==2?8:24,
                     belief,requested_plan,target,secondary_target);
-                command_priority.begin(epoch,GetTickCount64(),inspect_command_priority(obs.creature));
+                command_priority.begin(epoch,GetTickCount64(),inspect_command_priority(obs.creature),pending.night_priority());
             } else set_agenda(creature,pending.action==2?8:24,belief,requested_plan,target,secondary_target,1,1);
 #ifdef BWV_HELD_ACTIONS
             if(pending.action==21) {
@@ -1202,6 +1246,10 @@ std::string json() {
     std::string position_info="{\"version\":11,\"verified\":"+std::string(policy.held_enabled && current_movement.verified && position_contract()?"true":"false")
         +",\"map_size\":{\"x\":"+std::to_string(current_movement.width)+",\"z\":"+std::to_string(current_movement.depth)+"}}";
     std::string out="{\"experimental_manual_only\":true,\"supported\":"+std::string(supported?"true":"false")+
+        ",\"timing\":{\"catalog_interval_ms\":"+std::to_string(CatalogRefresh::interval_ms)
+            +",\"inspection\":"+inspection_work.json()+",\"catalog\":"+catalog_work.json()
+            +",\"target_pool\":"+target_pool_work.json()+",\"pickup_checks\":"+pickup_check_work.json()
+            +",\"recipes\":"+recipe_work.json()+",\"legacy_target\":"+legacy_target_work.json()+"}"+
         ",\"position_movement\":"+position_info+
         ",\"movement_pace\":{\"version\":"+(movement_pace_verified?"1":"0")+",\"hand_default\":\"run\",\"active\":"+(movement_pace.creature?"true":"false")
             +",\"requested\":\""+(requested_pace==Pace::run?"run":requested_pace==Pace::walk?"walk":"auto")+"\",\"applied\":"+(movement_pace.written?"true":"false")
@@ -1265,7 +1313,9 @@ std::string json() {
         ",\"candidates\":"+candidates+"}"+
         ",\"player_command_priority\":{\"version\":1,\"available\":"+
         ((supported && policy.repeat_enabled)?"true":"false")+
-        ",\"duration_ms\":"+std::to_string(CommandPriority::duration_ms)+
+        ",\"night_priority_version\":1,\"day_duration_ms\":"+std::to_string(CommandPriority::duration_ms)+
+        ",\"night_duration_ms\":"+std::to_string(CommandPriority::night_duration_ms)+
+        ",\"duration_ms\":"+std::to_string(command_priority.window_ms)+
         ",\"active\":"+(command_priority.active?"true":"false")+
         ",\"remaining_ms\":"+std::to_string(command_priority.remaining(GetTickCount64()))+
         ",\"status\":\""+command_priority.status+"\"}"+

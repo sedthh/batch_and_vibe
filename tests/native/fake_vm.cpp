@@ -6,6 +6,7 @@ using Callback = int(__cdecl*)(uint32_t);
 Callback entered = nullptr, left = nullptr;
 bool inside_callback = false;
 int current_task = 0, task_reads = 0;
+int global_reads=0, metadata_reads=0;
 char task_label[96]{};
 uint32_t operand_word = 0, operand_type = 0;
 extern "C" {
@@ -33,7 +34,7 @@ __declspec(dllexport) int LookIn(int context, int flag) {
     inside_callback = false;
     std::strcpy(task_label, "invalid_after_callback");
 #ifndef OMIT_TASK_NUMBER
-    if (task_reads != 4) return -12;
+    if (task_reads != 0 && task_reads != 2 && task_reads != 4) return -12;
 #endif
     if ((a != 1003 || b != 2003) && (a != 0 || b != 0)) return -11;
     return context + flag;
@@ -47,17 +48,22 @@ __declspec(dllexport) int NumTasks() { return 3; }
 __declspec(dllexport) int TaskNumber() {
     if (!inside_callback) ExitProcess(80);
     ++task_reads;
+    ++metadata_reads;
     return current_task;
 }
 __declspec(dllexport) const char* TaskName() {
     if (!inside_callback) ExitProcess(81);
     ++task_reads;
+    ++metadata_reads;
     return task_label;
 }
 #endif
 __declspec(dllexport) int CodeSize() { return 1234; }
 __declspec(dllexport) int LoopGlobalVariables(int, int(__cdecl* callback)(const char*, uint32_t, float)) {
+    ++global_reads;
     callback("synthetic_hunger", 2, 0.75f);
     return 0;
 }
+__declspec(dllexport) int SyntheticGlobalReads(){return global_reads;}
+__declspec(dllexport) int SyntheticMetadataReads(){return metadata_reads;}
 }

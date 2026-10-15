@@ -39,8 +39,9 @@ def sleep_state(source, now):
 
 def sleep_phase(source, now):
     """Model-facing phase; queued sleep must never imply already asleep."""
-    if sleep_state(source, now) is not True:
-        return None
+    state=sleep_state(source, now)
+    if state is None:return None
+    if state is False:return 'awake'
     activity=source['diagnostics']['action_probe']['activity']
     if activity['animation']==29:
         phase={2:'falling_asleep',3:'asleep',4:'waking_up'}.get(activity['controller_mode'])

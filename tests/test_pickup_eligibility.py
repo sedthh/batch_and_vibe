@@ -29,7 +29,7 @@ class PickupEligibilityTests(unittest.TestCase):
             h.probe['pickup_action']['targets']=[{'token':91,'kind':kind,'distance_engine_units':12,
                 'pickup_possible':False,'pickup_reason':'too_large_for_current_size'}]
             offer,s=session(h)
-            target=s.call('find_targets',{'kind':kind,'action':'pick_up','limit':3})['action_targets'][0]
+            target=s.call('find_targets',{'kind':kind,'action':'pick_up','limit':3})['unavailable_targets'][0]
             self.assertFalse(target['pickup_possible'])
             result=s.call('do_action',{'action':'pick_up','target':target['target_id']})
             self.assertEqual(result['reason'],'too_large_for_current_size')
@@ -54,10 +54,12 @@ class PickupEligibilityTests(unittest.TestCase):
             self.assertEqual(len(found),1)
             self.assertEqual(found[0]['miracle'],'water')
             self.assertTrue(found[0]['pickup_possible'])
-        found=s.call('find_targets',{'kind':'healing bubble','action':'pick_up','limit':5})['action_targets']
+        found=s.call('find_targets',{'kind':'healing bubble','action':'pick_up','limit':5})['unavailable_targets']
         self.assertFalse(found[0]['pickup_possible'])
-        all_bubbles=s.call('find_targets',{'kind':'miracle bubbles','action':'pick_up','limit':5})['action_targets']
-        self.assertEqual(len(all_bubbles),3)
+        result=s.call('find_targets',{'kind':'miracle bubbles','action':'pick_up','limit':5})
+        all_bubbles=result['action_targets']
+        self.assertEqual(len(all_bubbles),2)
+        self.assertEqual(result['unavailable_targets'][0]['miracle'],'heal')
         self.assertNotIn('miracle',all_bubbles[-1])
         water=s.call('find_targets',{'kind':'water','action':'pick_up','limit':1})['action_targets'][0]
         self.assertEqual(s.call('do_action',{'action':'pick_up','target':water['target_id']})['status'],

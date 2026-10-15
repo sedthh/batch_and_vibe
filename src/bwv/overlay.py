@@ -7,12 +7,13 @@ import math
 import time
 from urllib.parse import urlsplit
 from urllib.request import Request
+from urllib.error import HTTPError
 
 from .conversation import validate_question
 from .qa_live import InspectorSource
 from .profile_names import ProfileNames
 from .expressions import display_speech
-from .errors import error_banner
+from .errors import error_banner, ChatNotSubmitted
 
 
 class ChatInputHistory:
@@ -70,8 +71,39 @@ class OverlayClient:
         if self.pipe is not None:
             return self.pipe.call('question', payload, timeout=1200)
         body = json.dumps(payload).encode('utf-8')
-        return self._json(Request(self.base+'question',data=body,headers={
-            'Content-Type':'application/json','Origin':self.origin}),1200)
+        try:
+            return self._json(Request(self.base+'question',data=body,headers={
+                'Content-Type':'application/json','Origin':self.origin}),1200)
+        except HTTPError as error:
+            admission=error.headers.get('X-BWV-Chat-Not-Submitted')
+            if error.code==409 and admission in ('retry','stop'):
+                error.close()
+                raise ChatNotSubmitted(retryable=admission=='retry') from None
+            raise
+
+
+@dataclass
+class ChatSubmission:
+    """One input, held briefly until admission; never replay an accepted request."""
+    text: str
+    identity: tuple[str,str]
+    deadline: float
+    sending: bool = False
+    next_attempt: float = 0
+
+    def readiness(self, model, now):
+        if model.identity is not None and model.identity!=self.identity:return 'changed'
+        if self.sending:return 'sending'
+        if now>=self.deadline:return 'expired'
+        if now>=self.next_attempt and model.identity==self.identity and model.can_send(now):return 'ready'
+        return 'waiting'
+
+    def retry(self, now):
+        self.sending=False
+        self.next_attempt=now+.5
+
+    def notice(self, now):
+        return f'[Waiting to send your message; retrying for up to {max(0,math.ceil(self.deadline-now))}s]'
 
 
 @dataclass

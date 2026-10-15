@@ -5,6 +5,7 @@ import struct
 import unittest
 
 from bwv import towns_live as live
+from bwv import town_needs_live as needs_live
 from bwv.llm_context import summarize_context
 from bwv.prompt import preview_prompt
 from bwv.creature_tools import CreatureToolSession
@@ -30,6 +31,26 @@ class TownMemory(NearbyMemory):
         self.put(self.town+live.TOWN_TRIBE,0)
         self.beliefs((30,90,0,0,0,0,0,100))
         self.bytes(self.town+live.TOWN_BELIEF+live.BELIEF_CAPS,struct.pack('<8f',*[200]*8))
+        self.bytes(needs_live.GET_RAW_DESIRE,needs_live.GET_RAW_DESIRE_CODE)
+        for address,code in needs_live.FLAG_LAYOUT_CODE:self.bytes(address,code)
+        self.needs([0]*17)
+        self.typed(self.town+needs_live.TOWN_DESIRE,b'.?AVTownDesire@@',12)
+        self.put(self.town+needs_live.TOWN_DESIRE+needs_live.DESIRE_TOWN,self.town)
+        self.flags()
+
+    def flags(self,indices=(0,1,3,4,5,8)):
+        flags=[0]*17
+        for index in indices:
+            flag=0x6900000+index*0x100
+            flags[index]=flag
+            self.typed(flag,b'.?AVTownDesireFlags@@',13)
+            self.bytes(flag+needs_live.FLAG_CATEGORY,struct.pack('<3I',index,0,self.town))
+        self.bytes(self.town+needs_live.TOWN_FLAGS,struct.pack('<17I',*flags))
+        return flags
+
+    def needs(self,base,temporary=None,modifiers=None):
+        for offset,values in ((0x19C,base),(0x108,temporary),(0xC4,modifiers)):
+            self.bytes(self.town+offset,struct.pack('<17f',*(values if values is not None else [0]*17)))
 
     def owner(self,slot):
         self.put(self.town+live.TOWN_OWNER,0 if slot is None else

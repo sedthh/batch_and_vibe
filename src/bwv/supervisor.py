@@ -104,7 +104,7 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
         settings = replace(settings, wake_on_question=False)
     notices = Notices(emit)
     notices.show('installation', f'Black & White installation: {root.resolve()}')
-    inspector = Inspector(limit=120 if debug and debug_session is None else 0, history_interval=1.0)
+    inspector = Inspector(limit=120 if debug and debug_session is None else 0, history_interval=3.0)
     supervisor = ObserverSupervisor(root, inspector, notices, validator=validate_reader)
     await supervisor.detach()
     overlay_process = None

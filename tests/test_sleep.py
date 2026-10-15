@@ -34,7 +34,10 @@ class SleepTests(unittest.TestCase):
                 self.assertEqual(result['activity']['sleep_phase'],expected)
                 self.assertEqual(result['activity'].get('sleeping',False),expected=='asleep')
         self.assertIsNone(sleep_phase(frame,102))
-        self.assertIsNone(sleep_phase(sleep_frame(frame,False),100))
+        self.assertEqual(sleep_phase(sleep_frame(frame,False),100),'awake')
+        context=summarize_context({'sleep_phase':'awake','sleeping':True})
+        self.assertEqual(context['activity']['sleep_phase'],'awake')
+        self.assertNotIn('sleeping',context['activity'])
 
     def test_only_verified_current_creature_activity_establishes_sleep(self):
         frame=sleep_frame({'observation':{'observed_at':100}})

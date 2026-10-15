@@ -24,6 +24,8 @@ from .creature_tools import ToolArgumentError, ToolContextUnavailable, TOOL_CONT
 from copy import deepcopy
 from .token_usage import TokenUsage
 from .prompt_cache import ordered_system, cached_request, cache_policy
+from .request_compaction import compact_messages, compact_json, generated_section, HISTORY_CONTRACT
+from .tool_docs import tool_documentation, wire_tool_definitions
 from .errors import ErrorLog
 from urllib.parse import urlsplit
 
@@ -295,6 +297,11 @@ class LLMProvider:
     def _tools(self, body, session, enabled):
         definitions = session.definitions()
         self.last_offered_tools=deepcopy(definitions) if enabled else []
+        messages = body.get('input' if self.config.api == 'responses' else 'messages', [])
+        # Keep descriptions in exactly one place. Other/legacy tool sessions
+        # without the matching generated reference retain their full schemas.
+        if messages and tool_documentation(definitions) in messages[0].get('content', ''):
+            definitions = wire_tool_definitions(definitions)
         body['tools'] = definitions if self.config.api == 'responses' else [
             {'type':'function','function':{k:v for k,v in d.items() if k!='type'}} for d in definitions]
         body['tool_choice'] = 'auto' if enabled else 'none'
@@ -360,20 +367,23 @@ class LLMProvider:
 
     def _body(self, request):
         from .conversation import model_system_prompt
-        messages = [dict(m) for m in request.messages]
+        messages = compact_messages(request.messages)
         if not messages or messages[0].get('role') != 'system':
             raise ProviderError('invalid_request')
         messages[0]['content'] = model_system_prompt(messages[0]['content'])
-        messages[0]['content'] += '\n\n## Provider response format\n\n'+WIRE_CONTRACT
+        messages[0]['content'] = generated_section(messages[0]['content'], 'response-format',
+            '## Provider response format\n\n'+WIRE_CONTRACT)
         if TOOL_CONTRACT not in messages[0]['content']:
             messages[0]['content'] += '\n\n## Available tools\n\n'+TOOL_CONTRACT
-        messages[0]['content'] += ('\n\n## Tool budget\n\n'
+        messages[0]['content'] = generated_section(messages[0]['content'], 'tool-budget', '## Tool budget\n\n'
             f'At most {self.config.max_tool_rounds} tool rounds and '
             f'{self.config.max_tool_calls} individual tool calls in this turn. '
             'Multiple calls in one round each count toward the call limit. '
             'Use existing observations when sufficient, then select at most one physical action. '
             'When tools are no longer offered, finish with the required reply JSON; '
             'do not claim an unselected action will happen.')
+        messages[0]['content'] = generated_section(messages[0]['content'], 'history-format',
+            '## Historical observations\n\n'+HISTORY_CONTRACT)
         messages[0]['content']=ordered_system(messages[0]['content'])
         schema = {'name': 'creature_reply', 'schema': REPLY_SCHEMA, 'strict': True}
         body = {'model': self.config.model}
@@ -588,7 +598,7 @@ class LLMProvider:
                             self.last_tool_trace=list(session.trace)
                             self.errors.record('invalid_tool_call','tool_execution',error=error,details=self.last_tool_error)
                             raise ProviderError('invalid_tool_call') from None
-                        results.append((call_id,json.dumps(output,allow_nan=False)))
+                        results.append((call_id,compact_json(output)))
                     self.last_tool_trace=list(session.trace)
                     calls_used+=len(calls);self.tool_rounds+=1
                     if self.config.api=='responses':

@@ -13,12 +13,15 @@ from .object_aliases import target_matches
 from .object_details import known_objects, public_object, lookup_order
 from .tool_docs import tool_documentation
 from .model_projection import model_turn, model_objects
+from .request_compaction import generated_section
 
 EATING_RECIPES = {'storage':'eat_from_storage', 'field':'eat_from_field',
                   'tree':'eat_from_tree', 'food_pile':'eat_from_food_pile'}
 HELD_RECIPES = {'put_down':('put_down',), 'eat':('eat_held',), 'discard':('discard_held',),
                 'throw_at':('throw_held_at',), 'cast_miracle':HELD_MIRACLE_ACTIONS}
 MOVEMENT_RECIPES = ('approach_hand','approach_object','move_to','move_to_position')
+# Per-page work, separate from the number of successful results requested.
+TARGET_LOOKUPS_PER_PAGE = 16
 
 
 def spell_name(action):
@@ -50,6 +53,7 @@ class DirectCreatureToolSession:
         self.async_validator=async_validator
         self.held_menu=()
         self.inspection_pages={}
+        self.target_searches={}
         self.selected_public_action=None
         self._object_metadata=None
 
@@ -86,6 +90,7 @@ class DirectCreatureToolSession:
         # Engine recipes and all target leases stay in the debugger/host. The
         # model gets a small schema menu, then inspects targets only when needed.
         current=model_turn(request.current)
+        current.pop('capabilities', None)
         # Gesture descriptions live only in the fixed system prompt. The host
         # still checks whether a returned cue can execute against this offer.
         capabilities={}
@@ -111,7 +116,8 @@ class DirectCreatureToolSession:
                 # The legacy planner uses decision candidates; this facade uses
                 # tools and deliberately removes candidates from observations.
                 message['content']=model_system_prompt(message['content'])
-                message['content']+='\n\n'+tool_documentation(self.definitions())
+                message['content']=generated_section(message['content'], 'tool-reference',
+                    tool_documentation(self.definitions()))
             if message.get('role') in ('user','assistant'):
                 try:message['content']=json.dumps(model_turn(json.loads(message['content'])),ensure_ascii=False)
                 except (ValueError,TypeError):pass
@@ -131,10 +137,11 @@ class DirectCreatureToolSession:
              'limit':{'type':'integer','minimum':1,'maximum':10},
              'offset':{'type':'integer','minimum':0,'maximum':1024},
              'action':action,'miracle':miracle,'center':center}))
-        result.append(schema('find_targets','Find action-compatible known objects relative to center (creature by default, or god_hand). Optional object_id looks up a remembered identity. Use returned object_id directly in action tools; target_id is a request-local fallback for objects without an identity. Bounded known objects, not the whole island. Null action defaults to move_to; null scope means known, near and far. Does not move or act.',
+        result.append(schema('find_targets','Find action-compatible known objects relative to center (creature by default, or god_hand), with important objects first. Start offset=0 and follow next_offset until enough targets are found. A partial search is not proof that no compatible target exists. Optional object_id looks up a remembered identity. Use returned object_id directly in action tools; target_id is a request-local fallback for objects without an identity. Bounded known objects, not the whole island. Null action defaults to move_to; null scope means known, near and far. Does not move or act.',
             {'kind':{'type':['string','null'],'maxLength':64,
                      'description':'Type, species or synonym; null searches every compatible kind. For places to eat use action=eat with kind=null or food_source. Fire/flames/blaze/burning filter objects reported as on fire, keeping their actual type and ID. Other examples: people, cattle, rocks/stones, mushrooms/fungi, toys, miracle bubbles.'},
              'limit':{'type':'integer','minimum':1,'maximum':10},
+             'offset':{'type':'integer','minimum':0,'maximum':4096},
              'scope':{'type':['string','null'],'enum':[None,'known','distant'],'maxLength':16},
              'action':action,'miracle':miracle,'center':center,
              'object_id':{'type':['string','null'],'maxLength':64}}))
@@ -197,7 +204,7 @@ class DirectCreatureToolSession:
         metadata=self._object_metadata
         for target in targets:
             # Preserve native capability metadata; supplement only descriptions.
-            for key in ('species','physical_traits','person','details','town_id','on_fire'):
+            for key in ('species','physical_traits','person','details','town_id','on_fire','engine_class'):
                 if key in metadata.get(target.get('object_id'),{}):
                     target[key]=metadata[target['object_id']][key]
             target['name']=public_object(target)['name']
@@ -213,7 +220,7 @@ class DirectCreatureToolSession:
         if 'type' in props and 'kind' in args and 'type' not in args:args['type']=args.pop('kind')
         for key,rule in props.items():
             if key not in args and 'null' in rule.get('type',[]):args[key]=None
-        if name=='inspect_surrounding':args.setdefault('offset',0)
+        if name in ('inspect_surrounding','find_targets'):args.setdefault('offset',0)
         if args.keys()!=props.keys():raise ToolArgumentError('unexpected_or_missing_argument')
         for key,value in args.items():
             rule=props[key]
@@ -388,28 +395,55 @@ class DirectCreatureToolSession:
             return (target_matches(args['kind'],obj) and (not args['object_id'] or obj.get('object_id')==args['object_id'])
                 and (center=='creature' or type(obj.get(distance)) in (int,float))
                 and (args['scope']!='distant' or obj.get(distance,0)>NEARBY_TARGET_DISTANCE))
-        targets=[t for recipe in recipes for t in self._targets(recipe) if matches(t)]
-        raw=frame.get('observation') or {}
-        objects=[o for o in known_objects(raw.get('surroundings') or {}) if matches(o) and self._recipes_for_object(recipes,o)]
-        objects.sort(key=lambda o:lookup_order(o,distance,explicit_kind=args['kind'] is not None))
-        errors=[];lookups=0
-        for obj in objects:
-            if len(targets)>=args['limit'] or lookups>=args['limit']:break
-            if any(t.get('object_id')==obj['object_id'] for t in targets):continue
-            lookups+=1
-            for recipe in self._recipes_for_object(recipes,obj):
-                try:targets.extend(t for t in (yield from self._reserve(obj['object_id'],recipe)) if matches(t))
-                except ToolContextUnavailable:raise
-                except (OSError,ValueError,TimeoutError) as error:errors.append(str(error))
-        targets.sort(key=lambda t:lookup_order(t,distance,explicit_kind=args['kind'] is not None))
+        offered={}
+        for recipe in recipes:
+            for target in self._targets(recipe):
+                if matches(target):offered.setdefault(self._target_key(target),[]).append(target)
+        key=(args['kind'],center,args['action'],args['miracle'],args['scope'],args['object_id'])
+        if args['offset']==0 or key not in self.target_searches:
+            raw=frame.get('observation') or {}
+            objects={o['object_id']:deepcopy(o) for o in known_objects(raw.get('surroundings') or {})
+                     if matches(o) and self._recipes_for_object(recipes,o)}
+            for identity,choices in offered.items():objects.setdefault(identity,deepcopy(choices[0]))
+            self.target_searches[key]=sorted(objects.items(),key=lambda item:
+                lookup_order(item[1],distance,explicit_kind=args['kind'] is not None))
+        objects=self.target_searches[key]
+        targets=[];errors=[];unavailable=[];lookups=0;cursor=args['offset']
+        while cursor<len(objects) and len(targets)<args['limit']:
+            identity,obj=objects[cursor]
+            choices=offered.get(identity,[])
+            if not choices and obj.get('object_id'):
+                compatible=self._recipes_for_object(recipes,obj)
+                if lookups+len(compatible)>TARGET_LOOKUPS_PER_PAGE:break
+                for recipe in compatible:
+                    lookups+=1
+                    try:choices.extend(t for t in (yield from self._reserve(obj['object_id'],recipe)) if matches(t))
+                    except ToolContextUnavailable:raise
+                    except (OSError,ValueError,TimeoutError) as error:errors.append(str(error))
+            cursor+=1
+            usable=[t for t in choices if not (args['action']=='pick_up' and t.get('pickup_possible') is False)]
+            if usable:targets.append(usable[0])
+            elif choices and len(unavailable)<3:
+                unavailable.append(deepcopy(choices[0]))
         result={'action':args['action'],'scope':args['scope'] or 'known','center':center,
             'coverage':'bounded_sample_of_creature_known_objects_not_entire_island',
             'nearby_radius_engine_units':NEARBY_TARGET_DISTANCE,'maximum_search_distance_engine_units':KNOWN_TARGET_DISTANCE,
-            'reachability_verified':False,'executed':False}
+            'reachability_verified':False,'executed':False,
+            'matching_known_objects':len(objects),'offset':args['offset'],
+            'searched_objects':max(0,cursor-args['offset']),
+            'next_offset':cursor if cursor<len(objects) else None,'search_complete':cursor>=len(objects)}
         if targets:
-            result['action_targets']=targets[:args['limit']]
-            result['more_offered_targets']=max(0,len(targets)-args['limit'])
+            result['action_targets']=targets
+            result['more_offered_targets']=sum(any(args['action']!='pick_up' or t.get('pickup_possible') is not False
+                for t in offered.get(identity,())) for identity,_ in objects[cursor:])
+        if unavailable:result['unavailable_targets']=unavailable
         if errors:result['target_lookup']={'status':'lookup_failed','reasons':errors}
+        if not targets and result['next_offset'] is not None:
+            result.update(status='search_incomplete',reason='No compatible target on this page. Continue with next_offset to check the remaining known objects.')
+            return result
+        if not targets and errors:
+            result.update(status='target_lookup_failed',reason='Some targets could not be checked. Retry this page; this is not proof that no compatible target exists.')
+            return result
         return self._search_status(result,args,recipes,targets,nearby=False)
 
     @staticmethod

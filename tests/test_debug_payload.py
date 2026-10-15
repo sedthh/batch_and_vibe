@@ -1,5 +1,6 @@
 """Debugging must not copy whole worlds or histories for collapsed panels."""
 from copy import deepcopy
+from dataclasses import asdict, replace
 import http.client
 import json
 import threading
@@ -19,6 +20,60 @@ class NoCopy(dict):
 
 
 class DebugPayloadTests(unittest.TestCase):
+    def test_shared_details_remain_current_and_do_not_reencode_on_fast_updates(self):
+        from bwv.surroundings import NearbyObject, SurroundingsContext
+        from bwv.qa import _debug_value
+        objects=tuple(NearbyObject(f'object-{i}','tree',i+1) for i in range(300))
+        details=SurroundingsContext(available=True,known_objects=objects,
+                                   nearby_known_objects=objects[:100])
+        obs=playable(100,surroundings=details)
+        observer=Inspector(limit=0)
+        observer.update(obs,{},None,None,100)
+        first=observer.latest_frame()
+        with patch('bwv.qa._debug_value',wraps=_debug_value) as encode:
+            for i in range(1,21):
+                now=100+i*.25
+                current=replace(obs,sequence=i,observed_at=now,paused=bool(i%2))
+                observer.update(current,{},None,None,now)
+                self.assertEqual(observer.latest_frame()['observation'],_debug_value(asdict(current)))
+            self.assertFalse(any(call.args[0] is details for call in encode.call_args_list))
+        self.assertEqual(first['observation']['observed_at'],100)
+        replacement=replace(details,known_objects=(),nearby_known_objects=())
+        observer.update(replace(obs,observed_at=106,surroundings=replacement),{},None,None,106)
+        self.assertEqual(observer.latest_frame()['observation']['surroundings']['known_objects'],())
+        self.assertEqual(len(first['observation']['surroundings']['known_objects']),300)
+        observer.update(replace(obs,session='new-game',observed_at=107),{},None,None,107)
+        self.assertEqual(observer.latest_frame()['observation'],_debug_value(asdict(replace(obs,session='new-game',observed_at=107))))
+        self.assertEqual(len(observer._detail_encoding),3)
+
+    def test_cached_details_preserve_null_sanitization_and_raw_observation(self):
+        observer=Inspector(limit=0)
+        obs=playable(100)
+        unavailable=replace(obs,observed_at=float('-inf'))
+        observer.update(unavailable,{},None,None,100)
+        self.assertIsNone(observer.latest_frame()['observation']['observed_at'])
+        self.assertEqual(unavailable.observed_at,float('-inf'))
+
+    def test_observer_summary_skips_raw_catalog_and_closed_memory_panel(self):
+        observer=Inspector()
+        observer.update(playable(0),{},None,None,0)
+        full=observer.payload()
+        observer.latest['prompt']=NoCopy({'system':'large immutable prompt'})
+        observer.latest['diagnostics']['action_probe']=NoCopy({'catalog':'large'})
+        observer.latest['memory']=NoCopy({'recent_pairs':['large history']})
+        observer.latest['observation']['raw_objects']=NoCopy({'world':'large'})
+        compact=observer.debug_payload()
+        self.assertNotIn('prompt',compact['current'])
+        self.assertNotIn('memory',compact['current'])
+        self.assertNotIn('action_probe',compact['current']['diagnostics'])
+        self.assertEqual(compact['current']['model_context'],full['current']['model_context'])
+        self.assertEqual(compact['history'],full['history'])
+        compact['current']['model_context']['changed']=True
+        self.assertNotIn('changed',observer.latest['model_context'])
+        observer.latest['memory']={'recent_pairs':['requested history']}
+        self.assertEqual(observer.debug_payload(['history'])['current']['memory'],observer.latest['memory'])
+        self.assertIs(observer.debug_payload(['full'])['current'],observer.latest)
+
     def setUp(self):
         self.runtime = LiveChatRuntime.__new__(LiveChatRuntime)
         self.runtime._state_lock = threading.Lock()

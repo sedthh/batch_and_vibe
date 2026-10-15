@@ -4,6 +4,7 @@
 #include "building_types.h"
 #include "object_types.h"
 #include "object_fire.h"
+#include "object_type_view.h"
 namespace bwv_probe {
 bool throw_contract() {
     const uintptr_t info=0xC6C490+throw_plan*0x110;
@@ -44,23 +45,37 @@ bool inspect_target_pool(uintptr_t creature,uintptr_t mental,uintptr_t held,Know
         for(uint32_t i=0;i<length;++i) {
             if(!node || !movement_belief(node) || word(node+12)!=previous)return false;
             const auto obj=word(node+0x30);
-            unsigned kind=type(obj,".?AVTree@@")?1:type(obj,".?AVRock@@")?2:
-                (type(obj,".?AVVillager@@") || type(obj,".?AVSpecialVillager@@"))?3:
-                type(obj,".?AVAbode@@")?4:type(obj,".?AVCreature@@")?5:
-                type(obj,".?AVCitadel@@")?6:(type(obj,".?AVBall@@") || type(obj,".?AVFootball@@"))?7:
-                type(obj,".?AVPileFood@@")?8:type(obj,".?AVPileWood@@")?9:
-                animal_object(obj,type)?10:
-                (type(obj,".?AVOneOffSpellSeed@@") || type(obj,".?AVSpellSeed@@"))?11:
-                type(obj,".?AVField@@")?12:type(obj,".?AVSpellDispenser@@")?13:
-                type(obj,".?AVFishFarm@@")?14:type(obj,".?AVFlock@@")?15:0;
-            if(!kind)kind=object_kind(obj,type,word);
-            if(!kind)kind=building_kind(obj,type,word);
+            const auto check=object_type_view(obj,word,type_table);
+            unsigned kind=check(obj,".?AVTree@@")?1:check(obj,".?AVRock@@")?2:
+                (check(obj,".?AVVillager@@") || check(obj,".?AVSpecialVillager@@"))?3:
+                check(obj,".?AVAbode@@")?4:check(obj,".?AVCreature@@")?5:
+                check(obj,".?AVCitadel@@")?6:(check(obj,".?AVBall@@") || check(obj,".?AVFootball@@"))?7:
+                check(obj,".?AVPileFood@@")?8:check(obj,".?AVPileWood@@")?9:
+                animal_object(obj,check)?10:
+                (check(obj,".?AVOneOffSpellSeed@@") || check(obj,".?AVSpellSeed@@"))?11:
+                check(obj,".?AVField@@")?12:check(obj,".?AVSpellDispenser@@")?13:
+                check(obj,".?AVFishFarm@@")?14:check(obj,".?AVFlock@@")?15:0;
+            if(!kind)kind=object_kind(obj,check,word);
+            if(!kind)kind=building_kind(obj,check,word);
+            // Retain unfamiliar world types using their actual base layout.
+            // Debris remains count-only by product choice, never an action ID.
+            const auto bases=!kind && obj && !check(obj,".?AVFragment@@")?world_bases(obj):0;
+            if(bases&1)kind=29;
             int32_t x=0,z=0;
             if(kind && obj!=held && obj!=creature && read(obj+0x14,x) && read(obj+0x18,z)) {
                 const double distance=std::hypot(double(x)-cx,double(z)-cz)*(10./65536.);
-                pool.add({obj,node,word(obj),kind,distance,kind==6 && is_player_temple(obj,creature),
+                ThrowPoint point{obj,node,check.table,kind,distance,kind==6 && is_player_temple(obj,creature),
                     object_fire(obj,[](uintptr_t address,auto& value){return read(address,value);}),
-                    hand_verified?std::hypot(x*(10./65536.)-hand_x,z*(10./65536.)-hand_z):-1.,x*(10./65536.),z*(10./65536.)});
+                    hand_verified?std::hypot(x*(10./65536.)-hand_x,z*(10./65536.)-hand_z):-1.,x*(10./65536.),z*(10./65536.),
+                    -1,nullptr,0,kind==29 && !(bases&2)};
+                if(kind==3) {
+                    // Dead people retain their Villager type. The current
+                    // state byte, not the continuation state, distinguishes them.
+                    read(obj+0x8C,point.person_state);
+                    uint8_t flags=0;read(obj+0x25,flags);
+                    point.important_person=(flags&4) || point.person_state==4 || point.person_state==204;
+                }
+                pool.add(point);
             }
             previous=node;node=word(node+8);
         }

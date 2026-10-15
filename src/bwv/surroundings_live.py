@@ -1,5 +1,5 @@
 """Bounded creature-belief traversal and current proximity, without game calls."""
-from .object_types import OBJECT_KINDS, object_kind
+from .object_types import OBJECT_KINDS, object_kind, engine_class_name
 from .object_fire import read_object_fire
 from dataclasses import dataclass
 import hashlib
@@ -153,11 +153,21 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
                     object_type = reader.read(obj,4)
                     runtime_type = kind(obj)
                     obj_kind = OBJECT_KINDS.get(runtime_type) or object_kind(reader, obj, runtime_type, kind) or building_kind(reader, obj, runtime_type, kind)
+                    engine_class = engine_class_name(runtime_type) if not obj_kind else None
+                    if engine_class:obj_kind = 'object'
+                    position_data = None
                     if obj_kind:
-                        pos = reader.read(obj+0x14,12)
-                        x,z,y = struct.unpack('<iif',pos)
-                        if not math.isfinite(y):
-                            raise SurroundingsReadError('invalid_object_position')
+                        try:
+                            x,z,y = struct.unpack('<iif',reader.read(obj+0x14,12))
+                            if not math.isfinite(y):raise SurroundingsReadError('invalid_object_position')
+                            position_data = x,z,y
+                        except (OSError,ValueError):
+                            if not engine_class:raise
+                            # An unrecognized belief object with unreadable
+                            # position data must not discard the known scene.
+                            detail_errors+=1
+                    if position_data is not None:
+                        x,z,y = position_data
                         checks.append((obj,object_type))
                         distance = math.hypot(x-cx,z-cz)*POSITION_SCALE
                         hand_distance=math.hypot(x*POSITION_SCALE-hx,z*POSITION_SCALE-hz) if hand_checks else None
@@ -208,7 +218,7 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
                                 round(hand_distance,1) if hand_distance is not None else None,
                                 position({'x':x*POSITION_SCALE,'z':z*POSITION_SCALE}) if detailed and obj_kind in POSITION_KINDS else None,
                                 species,traits or None,person or None,metadata or None,obj,
-                                owner_god_id=owner_id,owner_link=owner_link)
+                                owner_god_id=owner_id,owner_link=owner_link,engine_class=engine_class)
                             known_objects.append(item)
                             if distance<=SUMMARY_RADIUS:objects.append(item)
                             if hand_distance is not None and hand_distance<=SUMMARY_RADIUS:hand_objects.append(item)
@@ -272,5 +282,5 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
                                 god_hand_objects=tuple(hand_objects),hand_read_errors=hand_errors,
                                 creature_read_errors=creature_errors,person_read_errors=person_errors,
                                 known_objects=tuple(known_objects),detail_read_errors=detail_errors,
-                                portal_read_errors=portal_errors))
+                                portal_read_errors=portal_errors,town_need_read_errors=towns.need_errors))
     raise SurroundingsReadError('identity_or_beliefs_changed')

@@ -194,6 +194,44 @@ class ExperienceStreamTests(IsolatedAsyncioTestCase):
             finally:await stream.aclose()
         reader.close.assert_called_once()
 
+    async def test_optional_town_needs_error_is_visible_without_fast_rescans(self):
+        nearby=SurroundingsContext(True,(NearbyObject('house','house',4),),town_need_read_errors=1)
+        base=playable();reader=Mock();cache=DetailRefresh(interval=10000)
+        samples=Mock(return_value=SimpleNamespace(session=base.session,creature_id=base.creature_id,context=nearby))
+        with ExitStack() as stack:
+            overrides={
+                'bwv.watch.snapshot':Mock(return_value={}),
+                'bwv.watch.from_observer':lambda *args:replace(base,observed_at=time.monotonic()),
+                'bwv.training_live.TrainingReader':Mock(return_value=reader),
+                'bwv.control_live.read_pause':Mock(return_value=SimpleNamespace(paused=False)),
+                'bwv.control_live.with_pause':lambda obs,*args:obs,
+                'bwv.control_live.read_camera_control':Mock(return_value=None),
+                'bwv.control_live.with_camera_control':lambda obs,*args:obs,
+                'bwv.control_live.read_temple':Mock(return_value=None),
+                'bwv.control_live.with_temple':lambda obs,*args:obs,
+                'bwv.creature_live.read_creature':Mock(return_value=SimpleNamespace(creature_id=base.creature_id,
+                    context=base.creature,script_owns_creature=False)),
+                'bwv.surroundings_live.read_surroundings':samples,
+            }
+            for name,value in overrides.items():stack.enter_context(patch(name,value))
+            stream=observations(123,control=True,detail_refresh=cache)
+            try:
+                for _ in range(3):
+                    obs,state,_,error=await anext(stream)
+                    self.assertTrue(obs.connected)
+                    self.assertEqual(obs.surroundings,nearby)
+                    self.assertEqual(error,'town_needs:read_unavailable')
+                    self.assertIsNotNone(state['detailed_sensors']['observed_at'])
+                self.assertEqual(samples.call_count,1)
+                samples.return_value.context=replace(nearby,town_need_read_errors=0)
+                cache.request()
+                obs,_,_,error=await anext(stream)
+                self.assertIsNone(error)
+                self.assertEqual(obs.surroundings.town_need_read_errors,0)
+                self.assertEqual(samples.call_count,2)
+            finally:await stream.aclose()
+        reader.close.assert_called_once()
+
     async def asyncSetUp(self):
         sensor=patch('bwv.environment_live.read_environment',return_value=Environment('morning',8,'engine_visual_clock'))
         self.environment_reader=sensor.start()

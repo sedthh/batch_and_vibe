@@ -10,7 +10,7 @@ int enter_count = 0, leave_count = 0;
 int original_enter(uint32_t slot) { ++enter_count; return 1000 + slot; }
 int original_leave(uint32_t slot) { ++leave_count; return 2000 + slot; }
 struct Entry { void* function; uint32_t inputs, outputs, reserved; char name[128]; };
-int main() {
+int main(int argc,char**) {
     HMODULE module = LoadLibraryW(L"ScriptLibraryR.dll");
     if (!module) { std::printf("load error %lu\n", GetLastError()); return 1; }
     auto version = reinterpret_cast<int(*)()>(GetProcAddress(module, "Version"));
@@ -51,6 +51,28 @@ int main() {
     DWORD previous = 0;
     if (!VirtualProtect(memory + 4096, 4096, PAGE_READONLY, &previous)) return 8;
     if (init(41,table,nullptr,reinterpret_cast<void*>(&original_enter),reinterpret_cast<void*>(&original_leave),1,nullptr) != 42) return 4;
+    if(argc>1) {
+        auto vm=GetModuleHandleW(L"_bwv_original_vm.dll");
+        auto reads=reinterpret_cast<int(*)()>(GetProcAddress(vm,"SyntheticGlobalReads"));
+        auto metadata=reinterpret_cast<int(*)()>(GetProcAddress(vm,"SyntheticMetadataReads"));
+        if(!reads || !metadata)return 20;
+        for(int i=0;i<6;++i){if(tick(40,2)!=42)return 21;Sleep(50);}
+        if(reads()!=0 || metadata()!=0)return 22;
+        std::puts("idle_ready");std::fflush(stdout);
+        int stopped_reads=0,stopped_metadata=0;
+        for(int i=0;i<100;++i){
+            if(tick(40,2)!=42)return 23;
+            if(i==80){stopped_reads=reads();stopped_metadata=metadata();}
+            Sleep(50);
+        }
+        if(!stopped_reads || reads()!=stopped_reads || metadata()!=stopped_metadata)return 24;
+        if(enter_count!=106 || leave_count!=106)return 25;
+        std::puts("idle_suspended");std::fflush(stdout);
+        for(int i=0;i<30;++i){if(tick(40,2)!=42)return 26;Sleep(50);}
+        if(reads()<=stopped_reads)return 27;
+        if(enter_count!=136 || leave_count!=136)return 28;
+        std::puts("idle_resumed");return 0;
+    }
     std::printf("ready %lu\n", GetCurrentProcessId()); std::fflush(stdout);
     for (int i = 0; i < 100; ++i) {
         if (tick(40,2) != 42) return 5;

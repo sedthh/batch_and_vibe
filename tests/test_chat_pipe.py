@@ -14,10 +14,33 @@ from urllib.error import HTTPError
 from bwv.chat_pipe import ChatPipeServer, ChatPipeClient, parse_endpoint
 from bwv.overlay import OverlayClient
 from bwv.qa import make_server
+from bwv.errors import ChatNotSubmitted
 
 
 @unittest.skipUnless(os.name == 'nt', 'Windows named pipe transport')
 class PipeTests(unittest.TestCase):
+    def test_only_explicit_pre_admission_rejections_can_be_retried(self):
+        processed=[]
+        def question(body):
+            if body['question']=='wait':raise ChatNotSubmitted()
+            if body['question']=='changed':raise ChatNotSubmitted(retryable=False)
+            processed.append(body)
+            if body['question']=='failed':raise ValueError('Failure after admission')
+            return {'ok':True}
+        server=ChatPipeServer(lambda:{},question)
+        try:
+            client=OverlayClient(server.endpoint)
+            for text,retryable in (('wait',True),('changed',False)):
+                with self.assertRaises(ChatNotSubmitted) as caught:client.ask(text,('s','c'))
+                self.assertEqual(caught.exception.retryable,retryable)
+            self.assertEqual(processed,[])
+            with self.assertRaises(ValueError) as caught:client.ask('failed',('s','c'))
+            self.assertNotIsInstance(caught.exception,ChatNotSubmitted)
+            self.assertEqual(len(processed),1)
+            self.assertEqual(client.ask('ready',('s','c')),{'ok':True})
+            self.assertEqual(len(processed),2)
+        finally:server.close()
+
     def test_state_question_and_invalid_request_without_http(self):
         calls=[]
         server=ChatPipeServer(lambda:{'runtime':{'mode':'fixture'}},lambda body:calls.append(body) or {'ok':True})

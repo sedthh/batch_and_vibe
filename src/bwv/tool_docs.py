@@ -1,5 +1,34 @@
 """System-prompt reference generated from the very schemas sent to the provider."""
 import json
+from copy import deepcopy
+
+
+def wire_tool_definitions(definitions):
+    """Omit duplicate prose only when the provider has the matching system docs.
+
+    Validation keywords and property names are untouched. In particular, a
+    property called 'description' is an argument, not a schema annotation.
+    """
+    documented = tool_documentation(definitions)
+    def schema(rule):
+        if not isinstance(rule, dict):
+            return deepcopy(rule)
+        # Nested parameter annotations are not all rendered by _type. Keep any
+        # prose absent from the generated reference rather than silently lose it.
+        result = {k: deepcopy(v) for k, v in rule.items()
+                  if not (k == 'description' and isinstance(v, str) and v in documented)}
+        for key in ('properties', '$defs', 'definitions', 'patternProperties'):
+            if key in result:
+                result[key] = {name: schema(value) for name, value in result[key].items()}
+        for key in ('items', 'additionalProperties', 'not', 'if', 'then', 'else'):
+            if key in result:
+                result[key] = schema(result[key])
+        for key in ('anyOf', 'oneOf', 'allOf', 'prefixItems'):
+            if key in result:
+                result[key] = [schema(value) for value in result[key]]
+        return result
+    return [{**{k: deepcopy(v) for k, v in d.items() if k not in ('description', 'parameters')},
+             'parameters': schema(d['parameters'])} for d in definitions]
 
 
 def _type(rule):

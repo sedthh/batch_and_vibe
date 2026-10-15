@@ -17,6 +17,7 @@ enum class Phase { unavailable, ready, queued, accepted, observed, finished, rej
 struct Command {
     static constexpr uint32_t interrupt_flag = 0x80000000u;
     static constexpr uint32_t player_command_flag = 0x40000000u;
+    static constexpr uint32_t night_priority_flag = 0x08000000u;
     static constexpr uint32_t pace_mask = 0x30000000u;
     uint32_t magic = 0x42575041; // BWPA
     uint32_t version = 1;
@@ -27,7 +28,8 @@ struct Command {
     uint32_t reserved = 0; // v2 GoToHand: request-bound hand-target generation.
     bool interrupts() const { return (version & interrupt_flag)!=0; }
     bool player_command() const { return (version & player_command_flag)!=0; }
-    uint32_t protocol() const { return version & ~(interrupt_flag|player_command_flag|pace_mask); }
+    bool night_priority() const { return (version & night_priority_flag)!=0; }
+    uint32_t protocol() const { return version & ~(interrupt_flag|player_command_flag|night_priority_flag|pace_mask); }
     Pace pace() const {return static_cast<Pace>((version&pace_mask)>>28);}
 };
 static_assert(sizeof(Command) == 40);
@@ -149,6 +151,7 @@ struct Policy {
             : command.generation==generation;
         if (command.magic != 0x42575041 || (command.interrupts() && !priority)
                 || (command.player_command() && !repeat_enabled)
+                || (command.night_priority() && !command.player_command())
                 || command.pace()>Pace::run || (command.pace()!=Pace::automatic && !pace_action(command.action))
                 || (version != 1 && !conversation && !wake && !object && !held && !throwing && !pickup && !miracle && !world && !position)
                 || (command.action < 1 || command.action > 21)

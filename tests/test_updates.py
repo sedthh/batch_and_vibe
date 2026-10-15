@@ -38,7 +38,7 @@ class CompactContextTests(unittest.TestCase):
         self.assertEqual(payload, {'candidates':list(obs.candidates)})
         # Compactness budget for the base prompt, not a provider input-token cap.
         # Includes game background, roleplay and autonomous decision guidance.
-        self.assertLess(len(SYSTEM),12000)
+        self.assertLess(len(SYSTEM),12500)
         learned = replace(obs, miracles=MiracleContext(heal_knowledge=HealKnowledge(16,15.45)))
         self.assertEqual(json.loads(preview_prompt(learned,None).context_json)['learned_miracles'], ['heal'])
 

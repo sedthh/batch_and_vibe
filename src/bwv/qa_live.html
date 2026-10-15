@@ -99,8 +99,8 @@ function render(data){const frame=data.current,d=data.runtime;if(!frame||!d)retu
   $('memory-status').textContent=(frame.memory.persistence==='local_file'?'Saved locally across restarts.':'Session memory only.')+(frame.memory.storage_error?' Storage error: '+frame.memory.storage_error:'');
   $('history-status').textContent=`${frame.memory.recent_pair_count??frame.memory.recent_pairs?.length??0} retained exchanges (limit ${frame.memory.limits.pairs}).`;
   setJSON('history-json',frame.memory.recent_pairs);
-  $('memory').textContent=frame.memory.entries?.length?pretty(frame.memory.entries):(frame.memory.memory||'(No saved memories yet.)');$('speech').textContent=frame.speech.current?.text||'(no current speech)';
-  $('context').textContent=frame.model_context===undefined?'Restart the mod to enable this preview. Last request below shows the messages actually sent.':pretty(frame.model_context);setJSON('request',d.last_request);setJSON('full',data);
+  const memoryText=frame.memory.entries?.length?pretty(frame.memory.entries):(frame.memory.memory||'(No saved memories yet.)');if($('memory').textContent!==memoryText)$('memory').textContent=memoryText;$('speech').textContent=frame.speech.current?.text||'(no current speech)';
+  if(frame.model_context===undefined)$('context').textContent='Restart the mod to enable this preview. Last request below shows the messages actually sent.';else setJSON('context',frame.model_context);setJSON('request',d.last_request);setJSON('full',data);
   const pairs=frame.memory.recent_pairs||[],last=pairs.at(-1),decision=frame.last_decision??(last?{decision:last.decision,status:last.action_status}:null);$('decision').textContent=decision?pretty({...decision,dispatch:d.action_dispatch,wake:d.wake_dispatch}):'(no reply yet)';
   const creatureName=frame.character_names?.creature_name?.trim()||'Creature';
   const dialogue=frame.dialogue,signature=pretty([creatureName,dialogue]);if(signature!==historySignature){historySignature=signature;$('chat').replaceChildren();for(const pair of dialogue){const lines=[];if(pair.input.god_question)lines.push('God: '+pair.input.god_question);if(pair.answer?.trim())lines.push(creatureName+': '+pair.answer);if(pair.say?.trim())lines.push('Speech: '+pair.say);if(!lines.length)continue;const p=document.createElement('p');p.textContent=lines.join('\n');$('chat').append(p);}}
@@ -140,6 +140,6 @@ $('question').addEventListener('keydown',event=>{
 });
 $('form').onsubmit=async event=>{event.preventDefault();if(sending||unavailable)return;const question=$('question').value;if(question.trim()&&inputHistory.at(-1)!==question){inputHistory.push(question);if(inputHistory.length>10)inputHistory.shift();}inputHistoryIndex=null;inputDraft='';sending=true;$('send').disabled=true;$('error').textContent='';try{await api('question',{question});$('question').value='';}catch(error){$('error').textContent=error.message;}finally{sending=false;await poll();$('send').disabled=unavailable;}};
 for(const id of Object.values(debugPanels)){const panel=$(id).closest('details');panel.addEventListener('toggle',()=>{if(!panel.open)$(id).textContent='';if(!document.hidden)void poll();});}
-poll();setInterval(()=>{if(!document.hidden&&!polling)poll();},2000);
+poll();setInterval(()=>{if(!document.hidden&&!polling)poll();},5000);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)poll();});
 </script></html>

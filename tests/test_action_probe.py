@@ -12,6 +12,19 @@ def offered():
 
 
 class ActionProbeTests(unittest.TestCase):
+    def test_night_window_requires_player_origin_and_new_bridge_capability(self):
+        from bwv.action_probe import NativeActionAdapter, PLAYER_COMMAND_FLAG, NIGHT_PRIORITY_FLAG
+        state=offered();state.update(pid=123,captured_uptime_ms=110)
+        contract=state['action_probe']['player_command_priority']={'version':1,'available':True}
+        night=NativeActionAdapter(123,read=lambda pid:state,player_command=True,night_priority=True)
+        self.assertEqual(COMMAND.unpack(night.capture(0).packets[0][1])[1],1|PLAYER_COMMAND_FLAG)
+        contract['night_priority_version']=1
+        self.assertEqual(COMMAND.unpack(night.capture(0).packets[0][1])[1],1|PLAYER_COMMAND_FLAG|NIGHT_PRIORITY_FLAG)
+        day=NativeActionAdapter(123,read=lambda pid:state,player_command=True)
+        self.assertEqual(COMMAND.unpack(day.capture(0).packets[0][1])[1],1|PLAYER_COMMAND_FLAG)
+        automatic=NativeActionAdapter(123,read=lambda pid:state,night_priority=True)
+        self.assertEqual(COMMAND.unpack(automatic.capture(0).packets[0][1])[1],1)
+
     def test_player_priority_is_host_opt_in_and_requires_advertised_bridge(self):
         from bwv.action_probe import NativeActionAdapter, PLAYER_COMMAND_FLAG
         from bwv.dispatch import DecisionDispatcher

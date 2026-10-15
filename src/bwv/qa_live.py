@@ -40,7 +40,7 @@ from .creature_tools import CreatureToolSession, ToolContextUnavailable, TOOL_CO
 from .direct_tools import DirectCreatureToolSession
 from .llm_context import summarize_context, god_hand_context, creature_position_context, CONTEXT_CONTRACT
 from .expressions import display_reply
-from .errors import ErrorLog, error_banner
+from .errors import ErrorLog, error_banner, ChatNotSubmitted
 from .action_feedback import action_result
 from .sleep import sleep_state, sleep_phase
 from .feedback_context import FeedbackContext
@@ -324,7 +324,13 @@ class LiveChatRuntime:
             async_target_resolver=resolve_async,async_validator=validate_async,
             action_candidates=tuple(ACTION_CATALOG) if self.action_factory is not None else ())
 
-    def ingest(self, frame, *, publish=True):
+    def ingest(self, frame, *, publish=True, copy_source=True):
+        """Accept a sample; internal readers may share an immutable published frame.
+
+        The observer replaces frames instead of editing published ones. Other
+        callers retain the defensive copy, and all public payloads are copies.
+        Freshness/scene checks still run even when a frame is shared or repeated.
+        """
         now = self.clock()
         try:
             if not isinstance(frame,dict):
@@ -400,7 +406,7 @@ class LiveChatRuntime:
             obs = ControlObservation(raw['session'], raw['sequence'],stamp,
                 connected=raw['connected'] is True, supported=False,
                 creature_id=identity, creature_present=present, creature=form, **fields)
-            self.source = deepcopy(frame)
+            self.source = deepcopy(frame) if copy_source else frame
             if now-stamp<=self.gate.max_age:self.feedback_context.ingest(frame, now)
             self.gate.update(obs,now)
             self.last_error = None
@@ -573,22 +579,37 @@ class LiveChatRuntime:
     async def question(self, payload):
         self.last_chat_error=None
         try:return await self._question(payload)
+        except ChatNotSubmitted as error:
+            self.errors.record('chat_unavailable','question_admission',
+                details={'not_submitted':True,'retryable':error.retryable,'reason':error.reason})
+            self.publish()
+            raise
         except Exception as error:
             self._report_error('direct_question',error)
             raise
 
     async def _question(self, payload):
-        await self._wait_for_context()
-        if self.question_scene_blocked():raise ValueError(self.question_scene_blocked())
         if (type(payload) is not dict or 'question' not in payload
                 or not payload.keys() <= {'question','expected_identity'}):
             raise ValueError('Invalid question')
+        from .conversation import validate_question
+        validate_question(payload['question'])
         if 'expected_identity' in payload:
-            obs = self.gate.observation
             expected = payload['expected_identity']
-            if (type(expected) is not list or len(expected)!=2 or obs is None
-                    or expected != [obs.session,obs.creature_id]):
-                raise ValueError('Creature changed before message submission')
+            if (type(expected) is not list or len(expected)!=2
+                    or not all(isinstance(v,str) and v for v in expected)):
+                raise ValueError('Invalid expected creature identity')
+        try:
+            await self._wait_for_context()
+        except ToolContextUnavailable:
+            raise ChatNotSubmitted(reason='observation_refresh_timeout') from None
+        obs = self.gate.observation
+        if 'expected_identity' in payload and obs is not None:
+            if (expected[0] != obs.session or
+                    (obs.creature_id is not None and expected[1] != obs.creature_id)):
+                raise ChatNotSubmitted(retryable=False,reason='recipient_changed')
+        blocked=self.question_scene_blocked()
+        if blocked:raise ChatNotSubmitted(reason=blocked)
         # Explicit questions take priority over obsolete automatic work.
         self._cancel_automatic()
         try:
@@ -784,8 +805,8 @@ class LiveChatRuntime:
             'model_context':model_snapshot(current['snapshot']),
             'prompt':{'system':self.memory.system_prompt(system),'context':current['snapshot']},'status_updates':deepcopy(self.scheduled)}
         with self._state_lock:
-            # Ingest owns this copy; it is replaced, never mutated. Readers get
-            # their own copy below, so a second whole-world copy is unnecessary.
+            # The source is a published read-only frame, replaced rather than
+            # mutated. Public readers get their own copy below.
             self._published = {'current':frame,'runtime':metadata,'source':self.source}
 
     def payload(self, number=None):
@@ -907,42 +928,43 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
             return pid
         def action_factory(obs, *, expected_hand_generation=None, expected_object_generation=None, expected_held_generation=None,expected_throw_generation=None,expected_pickup_generation=None,miracle_action=None,expected_miracle_target=None,wake_action=False,world_action=None,expected_world_token=None,destination=None,pace=None,player_command=False):
             action_pid = process_for(obs)
+            priority = dict(player_command=player_command, night_priority=obs.environment.time_of_day == 'night')
             if destination is not None:
                 from .action_probe import PositionActionAdapter
-                return DecisionDispatcher(PositionActionAdapter(action_pid,interrupt=True,player_command=player_command,pace=pace,
+                return DecisionDispatcher(PositionActionAdapter(action_pid,interrupt=True,**priority,pace=pace,
                     expected_identity=(obs.session,obs.creature_id),destination=destination))
             if world_action is not None:
                 from .action_probe import WorldActionAdapter
-                return DecisionDispatcher(WorldActionAdapter(action_pid,interrupt=True,player_command=player_command,pace=pace,expected_identity=(obs.session,obs.creature_id),
+                return DecisionDispatcher(WorldActionAdapter(action_pid,interrupt=True,**priority,pace=pace,expected_identity=(obs.session,obs.creature_id),
                     world_action=world_action,expected_world_token=expected_world_token))
             if wake_action:
-                return DecisionDispatcher(QuestionWakeAdapter(action_pid,interrupt=True,player_command=player_command,expected_identity=(obs.session,obs.creature_id)))
+                return DecisionDispatcher(QuestionWakeAdapter(action_pid,interrupt=True,**priority,expected_identity=(obs.session,obs.creature_id)))
             if miracle_action is not None:
                 from .action_probe import MiracleActionAdapter
-                return DecisionDispatcher(MiracleActionAdapter(action_pid,interrupt=True,player_command=player_command,expected_identity=(obs.session,obs.creature_id),
+                return DecisionDispatcher(MiracleActionAdapter(action_pid,interrupt=True,**priority,expected_identity=(obs.session,obs.creature_id),
                     miracle_action=miracle_action,expected_miracle_target=expected_miracle_target))
             if expected_pickup_generation is not None:
                 from .action_probe import PickupActionAdapter
-                return DecisionDispatcher(PickupActionAdapter(action_pid,interrupt=True,player_command=player_command,expected_identity=(obs.session,obs.creature_id),
+                return DecisionDispatcher(PickupActionAdapter(action_pid,interrupt=True,**priority,expected_identity=(obs.session,obs.creature_id),
                     expected_pickup_generation=expected_pickup_generation))
             if expected_throw_generation is not None:
                 from .action_probe import ThrowActionAdapter
-                return DecisionDispatcher(ThrowActionAdapter(action_pid,interrupt=True,player_command=player_command,expected_identity=(obs.session,obs.creature_id),
+                return DecisionDispatcher(ThrowActionAdapter(action_pid,interrupt=True,**priority,expected_identity=(obs.session,obs.creature_id),
                     expected_throw_generation=expected_throw_generation,expected_held_generation=expected_held_generation))
             if expected_held_generation is not None:
                 return DecisionDispatcher(HeldActionAdapter(action_pid,
-                    interrupt=True,player_command=player_command,expected_identity=(obs.session,obs.creature_id),expected_held_generation=expected_held_generation))
+                    interrupt=True,**priority,expected_identity=(obs.session,obs.creature_id),expected_held_generation=expected_held_generation))
             if expected_object_generation is not None:
                 return DecisionDispatcher(TreeApproachAdapter(action_pid,
-                    interrupt=True,player_command=player_command,pace=pace,expected_identity=(obs.session, obs.creature_id),
+                    interrupt=True,**priority,pace=pace,expected_identity=(obs.session, obs.creature_id),
                     expected_object_generation=expected_object_generation))
             return DecisionDispatcher(ConversationActionAdapter(action_pid,
-                interrupt=True,player_command=player_command,pace=pace,expected_identity=(obs.session, obs.creature_id),
+                interrupt=True,**priority,pace=pace,expected_identity=(obs.session, obs.creature_id),
                 expected_hand_generation=expected_hand_generation))
         if config is None or config.wake_on_question:
             def wake_factory(obs):
                 return DecisionDispatcher(QuestionWakeAdapter(process_for(obs),
-                    interrupt=True,expected_identity=(obs.session, obs.creature_id)))
+                    interrupt=True,night_priority=obs.environment.time_of_day == 'night',expected_identity=(obs.session, obs.creature_id)))
     provider = None
     if config is not None:
         if config.wake_on_question:
@@ -953,7 +975,7 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
                 # action capability. The adapter rechecks identity and guards.
                 pid=process_for(obs) if current_action_pid is not None else int(obs.session.partition(':')[0])
                 return DecisionDispatcher(QuestionWakeAdapter(pid,
-                    interrupt=True,expected_identity=(obs.session,obs.creature_id)))
+                    interrupt=True,night_priority=obs.environment.time_of_day == 'night',expected_identity=(obs.session,obs.creature_id)))
         from .llm import LLMProvider
         from .credentials import credential_environment
         credentials_path = (Path(settings_path).parent if settings_path is not None else Path.cwd()) / '.local' / '.env'
@@ -1008,7 +1030,7 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
                 frame = await asyncio.to_thread(read_source)
             except (OSError,ValueError,KeyError):
                 frame = None
-            runtime.ingest(frame,publish=False)
+            runtime.ingest(frame,publish=False,copy_source=source_reader is None)
             await runtime.step()
             await asyncio.sleep(.25)
     finally:

@@ -3,6 +3,10 @@ from dataclasses import asdict, dataclass
 import math
 
 TRIBES = ('celtic','african','aztec','japanese','indian','egyptian','greek','norse','tibetan')
+# All 17 engine indices. The reader includes only categories with storage flags.
+TOWN_NEEDS = ('food','wood','playtime','protection','mercy','homes','civic_buildings',
+              'worship_supplies','children','building','rain','sun','repairs',
+              'workshop_supplies','wonder','relaxation','sleep')
 
 
 @dataclass(frozen=True)
@@ -23,6 +27,7 @@ class TownContext:
     player_belief_cap_engine_units: float
     conversion_reference_engine_units: float | None = None
     additional_belief_to_match_reference_engine_units: float | None = None
+    needs: dict[str, float] | None = None
 
     def __post_init__(self):
         if (not self.town_id or self.tribe not in (None,*TRIBES)
@@ -34,6 +39,11 @@ class TownContext:
                     self.conversion_reference_engine_units,self.additional_belief_to_match_reference_engine_units]
         if any(v is not None and (not math.isfinite(v) or not 0<=v<=1e9) for v in numbers):
             raise ValueError('Invalid town belief')
+        if self.needs is not None and (not isinstance(self.needs,dict)
+                or not set(self.needs)<=set(TOWN_NEEDS)
+                or any(type(v) not in (int,float) or not math.isfinite(v) or abs(v)>1e9
+                       for v in self.needs.values())):
+            raise ValueError('Invalid town needs')
 
 
 def town_details(town):
@@ -48,6 +58,10 @@ def compact_towns(towns):
         # Caps and neutral mechanics belong in inspection, not every tick.
         detail.pop('player_belief_cap_engine_units',None)
         detail.pop('neutral_belief_engine_units',None)
+        needs=detail.pop('needs',None)
+        if needs is not None:
+            detail['top_needs']=dict(sorted(((k,v) for k,v in needs.items() if v>0),
+                                           key=lambda item:-item[1])[:3])
         for b in detail['beliefs']:b['belief_engine_units']=round(b['belief_engine_units'],2)
         for key in ('conversion_reference_engine_units','additional_belief_to_match_reference_engine_units'):
             if key in detail:detail[key]=round(detail[key],2)

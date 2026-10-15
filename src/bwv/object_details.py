@@ -38,6 +38,11 @@ def public_object(obj):
     from .held_objects import RUNTIME_HELD_DETAILS
     result = {k:deepcopy(obj[k]) for k in ('object_id','kind','distance_engine_units',
         'distance_to_god_hand_engine_units','town_id','on_fire','miracle','object_type') if obj.get(k) is not None}
+    if obj.get('kind')=='object':
+        from .object_types import engine_class_name
+        label=obj.get('engine_class')
+        if isinstance(label,str) and engine_class_name(('.?AV'+label+'@@').encode('ascii',errors='replace'))==label:
+            result['engine_class']=label
     result.update(object_position(obj))
     if obj.get('species') in (*SPECIES.values(), *ANIMAL_TYPES.values()):result['species'] = obj['species']
     if obj.get('kind') == 'creature':
@@ -82,12 +87,17 @@ def lookup_order(obj, distance_key='distance_engine_units', *, explicit_kind=Fal
     """Generic discovery favors useful/urgent objects; explicit searches stay spatial."""
     kind = obj.get('kind')
     person = obj.get('person') or {}
-    priority = (0 if obj.get('on_fire') is True else
-                1 if kind == 'creature' or person.get('life_status') == 'dying' else
-                2 if person.get('is_actor') is True else
-                3 if kind in ('villager','temple','town_centre','totem','vortex','teleport') else
-                4 if kind in ('storage','house','abode','nursery','cemetery','workshop','wonder','field','scaffolding','worship_site','windmill') else
-                5 if kind in ('miracle_bubble','miracle_dispenser') else
-                6 if kind in ('food_pile','wood_pile','fishing_area','animal','animal_group') else
-                9 if kind in ('tree','rock') else 7)
-    return (0 if explicit_kind else priority, obj.get(distance_key,float('inf')), obj.get('object_id',''))
+    priority = (0 if kind == 'toy' else
+                1 if obj.get('on_fire') is True else
+                2 if kind == 'creature' else
+                3 if person.get('life_status') in ('dying','dead') else
+                4 if person.get('is_actor') is True else
+                5 if kind in ('villager','temple','town_centre','totem','vortex','teleport') else
+                6 if kind in ('storage','house','abode','nursery','cemetery','workshop','wonder','field','worship_site','windmill') else
+                7 if kind in ('miracle_bubble','miracle_dispenser') else
+                8 if kind in ('food_pile','wood_pile','mushroom','fishing_area','animal','animal_group') else
+                9 if kind == 'scaffolding' else
+                11 if kind in ('tree','rock') else 10)
+    # Even a specific-type search should surface burning/dying/important objects
+    # first; ordinary matches of that type remain ordered by distance.
+    return (min(priority,5) if explicit_kind else priority, obj.get(distance_key,float('inf')), obj.get('object_id',''))

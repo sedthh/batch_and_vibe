@@ -107,7 +107,7 @@ int main() {
     for(size_t i=0;i<count;++i){field|=targets[i].kind==12;dispenser|=targets[i].kind==13;}
     assert(field && dispenser && count==10);
     assert(nearby.select(1u<<12,targets)==1 && targets[0].object==80);
-    assert(nearby.select(portable_object_kinds,targets)==8);
+    assert(nearby.select(1u<<1,targets)==8);
     // The bounded generic sample may omit kinds; explicit focus must recover one.
     for(unsigned kind=2;kind<=target_kind_count;++kind)nearby.add({300+kind,400+kind,500+kind,kind,80});
     const auto diverse_count=nearby.select(all_object_kinds,targets);
@@ -121,7 +121,7 @@ int main() {
     bool recovered=false;
     for(size_t i=0;i<focused_count;++i)recovered|=focus_targets[i].object==9999;
     assert(recovered && focused_count<=known_target_capacity);
-    const auto portable_count=focused.select_portable(portable_object_kinds,focus_targets);
+    const auto portable_count=focused.select_nearby_or_focused(all_object_kinds,focus_targets);
     recovered=false;
     for(size_t i=0;i<portable_count;++i)recovered|=focus_targets[i].object==9999;
     assert(recovered && portable_count<=object_target_capacity);

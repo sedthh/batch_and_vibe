@@ -146,8 +146,12 @@ but starting or ending an animation does not prove the effect landed.
 World summaries cover known objects within 120 engine units; target inspection
 reaches 360, and distant search can look farther through the creature's known
 objects. Linked village buildings and villagers can include town, tribe, control
-and belief information. A belief reference shows progress toward conversion;
-the reported owner determines who actually controls the town. Unknown information
+and belief information. Examine a town or its storage building to see its full
+storage-flag needs; regular updates include the three largest positive demands.
+Only categories with actual storage flags are exposed. Internal desires without
+flags are omitted. Readings are unsmoothed demand, not exact visible flag heights.
+Meeting village needs can help impress the villagers. A belief reference shows
+progress toward conversion; the reported owner determines who controls the town. Unknown information
 is not treated as neutral ownership. These readings still need testing on later islands.
 Belief entries currently cover your player and the town's owner, not a full god roster.
 

@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import threading
 import unittest
+from bwv.errors import ChatNotSubmitted
 from urllib.parse import urlsplit
 
 from bwv.control import ControlObservation
@@ -17,6 +18,40 @@ from bwv.profile_names import ProfileNames
 
 
 class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_observer_frame_stays_read_only_and_still_expires(self):
+        from copy import deepcopy
+        from unittest.mock import patch
+        self.runtime.automatic=False
+        frame=self.frame(context={'surroundings':{'trees_nearby':2}})
+        original=deepcopy(frame)
+        copy=deepcopy
+        def checked_copy(value,*args,**kwargs):
+            self.assertIsNot(value,frame,'Internal ingest copied the whole observation')
+            return copy(value,*args,**kwargs)
+        with patch('bwv.qa_live.deepcopy',side_effect=checked_copy):
+            self.runtime.ingest(frame,copy_source=False)
+            await self.runtime.step()
+        self.assertIs(self.runtime.source,frame)
+        self.assertEqual(frame,original)
+        exported=self.runtime.payload()
+        exported['source']['prompt']['context']['surroundings']['trees_nearby']=999
+        self.assertEqual(frame,original)
+        old_stamp=self.runtime.gate.observation.observed_at
+        self.now+=6
+        self.runtime.ingest(frame,copy_source=False)
+        self.assertFalse(self.runtime.gate.poll(self.now).allowed)
+        self.assertIsNone(self.runtime.source)
+        self.assertEqual(frame['observation']['observed_at'],old_stamp)
+        self.assertEqual(frame,original)
+        self.runtime.ingest(self.frame(paused=True),copy_source=False)
+        self.assertTrue(self.runtime.gate.observation.paused)
+
+    async def test_default_ingest_keeps_mutable_callers_isolated(self):
+        frame=self.frame(context={'surroundings':{'trees_nearby':2}})
+        self.runtime.ingest(frame)
+        frame['prompt']['context']['surroundings']['trees_nearby']=999
+        self.assertEqual(self.runtime.source['prompt']['context']['surroundings']['trees_nearby'],2)
+
     async def test_island_roster_in_system_is_stable_across_hand_motion_and_replaced_on_change(self):
         from copy import deepcopy
         from bwv.island import IslandContext
@@ -198,8 +233,9 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
         scene=self.frame(cutscene=None)
         scene['diagnostics']['script_camera_owned']=None
         self.runtime.ingest(scene)
-        with self.assertRaisesRegex(ValueError,'scene_state_unverified'):
+        with self.assertRaises(ChatNotSubmitted) as caught:
             await self.runtime.question({'question':'Hello'})
+        self.assertEqual(caught.exception.reason,'scene_state_unverified')
         await self.runtime.step()
         self.assertEqual(self.runtime.broker.calls_started,0)
         self.assertEqual(self.runtime.payload()['current']['question_unavailable'],'scene_state_unverified')
@@ -224,8 +260,9 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.ingest(self.frame({'surroundings':{'trees_nearby':2}},
                                        script_owns_creature=True,cutscene=False))
         await self.runtime.step()
-        with self.assertRaisesRegex(ValueError,'scripted_creature'):
+        with self.assertRaises(ChatNotSubmitted) as caught:
             await self.runtime.question({'question':'Hello'})
+        self.assertEqual(caught.exception.reason,'scripted_creature')
         with self.assertRaises(ValueError):await self.runtime.force_tick({})
         self.assertEqual(self.runtime.broker.calls_started,0)
         self.assertEqual(self.runtime.payload()['current']['question_unavailable'],'scripted_creature')
@@ -246,8 +283,9 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.ingest(self.frame())
         await self.runtime.step()
         self.assertEqual(self.runtime.broker.calls_started,0)
-        with self.assertRaisesRegex(ValueError,'fullscreen_overlay_unavailable'):
+        with self.assertRaises(ChatNotSubmitted) as caught:
             await self.runtime.question({'question':'status'})
+        self.assertEqual(caught.exception.reason,'fullscreen_overlay_unavailable')
         with self.assertRaises(ValueError):await self.runtime.force_tick({})
         self.assertEqual(self.runtime.broker.calls_started,0)
         self.assertEqual(self.runtime.payload()['current']['question_unavailable'],blocked[0])
@@ -550,7 +588,7 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
         await self.runtime.step()
         await self.until(lambda:len(self.runtime.memory.history)==2)
         snapshot=self.runtime.provider.requests[-1].current['snapshot']
-        self.assertEqual(snapshot,{'surroundings':{'people_nearby':7}})
+        self.assertEqual(snapshot,{'activity':{'sleep_phase':'awake'},'surroundings':{'people_nearby':7}})
         self.assertEqual(self.runtime.payload()['runtime']['game_actions'],0)
 
     async def test_completed_action_reaches_next_provider_call_without_heartbeat_wait(self):

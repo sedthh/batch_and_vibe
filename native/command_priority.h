@@ -13,8 +13,9 @@ struct AgendaPriorityReading {
 // SetAgenda's native cleanup already clears the flag on replacement/completion.
 struct CommandPriority {
     static constexpr uint64_t duration_ms=7000;
+    static constexpr uint64_t night_duration_ms=10000;
     AgendaPriorityReading owned;
-    uint64_t epoch=0, deadline=0;
+    uint64_t epoch=0, deadline=0, window_ms=duration_ms;
     bool active=false;
     const char* status="not_requested";
 
@@ -23,8 +24,9 @@ struct CommandPriority {
         for(unsigned i=0;i<5;++i)if(now.agenda[i]!=owned.agenda[i])return false;
         return true;
     }
-    void begin(uint64_t session,uint64_t now,const AgendaPriorityReading& reading) {
-        owned=reading;epoch=session;deadline=now+duration_ms;
+    void begin(uint64_t session,uint64_t now,const AgendaPriorityReading& reading,bool night=false) {
+        window_ms=night?night_duration_ms:duration_ms;
+        owned=reading;epoch=session;deadline=now+window_ms;
         active=reading.valid && reading.forced==1;
         status=active?"active":"native_priority_not_observed";
     }
