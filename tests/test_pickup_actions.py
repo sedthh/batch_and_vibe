@@ -115,7 +115,7 @@ class PickupProtocolTests(unittest.IsolatedAsyncioTestCase):
             h=PickupHarness();wires=[]
             def handler(req):
                 self.assertFalse(h.sent);wires.append(json.loads(req.content))
-                if len(wires)==1:response=call(api,'inspect_surrounding',{'kind':None,'limit':10,'action':'pick_up','miracle':None})
+                if len(wires)==1:response=call(api,'find_targets',{'kind':None,'limit':10,'action':'pick_up','miracle':None, 'scope':'nearby'})
                 elif len(wires)==2:
                     wire=wires[-1]
                     outputs=([i['output'] for i in wire['input'] if i.get('type')=='function_call_output']

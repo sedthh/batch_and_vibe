@@ -55,7 +55,7 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
                 if len(wires)==1:
                     data=envelope(api,reply(answer="I'll try to water the fields now."))
                 elif len(wires)==2:
-                    data=call(api,'inspect_surrounding',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water'},'inspect')
+                    data=call(api,'find_targets',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water', 'scope':'nearby'},'inspect')
                 elif len(wires)==3:
                     items=wire['input' if api=='responses' else 'messages']
                     outputs=[i.get('output',i.get('content')) for i in items
@@ -124,7 +124,7 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
 
     def test_water_object_and_field_share_public_spell_without_cross_target_selection(self):
         _,_,session,_=self.session()
-        field=session.call('inspect_surrounding',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water'})
+        field=session.call('find_targets',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water', 'scope':'nearby'})
         self.assertEqual(len(field['action_targets']),1)
         target=field['action_targets'][0]['target_id']
         result=session.call('do_action',{'action':'cast_miracle','miracle':'fireball','target':target})
@@ -135,7 +135,7 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
     def test_missing_field_is_a_target_failure_not_missing_spell_or_water(self):
         _,_,session,_=self.session()
         session.inner.action_targets.pop('cast_water_field')
-        result=session.call('inspect_surrounding',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water'})
+        result=session.call('find_targets',{'kind':'field','limit':3,'action':'cast_miracle','miracle':'water', 'scope':'nearby'})
         self.assertEqual(result['status'],'no_compatible_target_nearby')
         self.assertEqual(result['miracle'],'water')
         self.assertNotIn('action_targets',result)

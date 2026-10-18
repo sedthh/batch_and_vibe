@@ -4,6 +4,7 @@ import json
 import re
 import httpx
 from copy import deepcopy
+from pathlib import Path
 from bwv.action_probe import HeldActionAdapter,HELD_ACTIONS,ACTIONS,COMMAND,dummy_decision
 from bwv.held_objects import HELD_KINDS
 from bwv.dispatch import DecisionDispatcher
@@ -29,6 +30,51 @@ class HeldHarness(Harness):
 
 
 class HeldActionTests(unittest.TestCase):
+    def test_native_hand_reading_precedes_temporary_control_gates(self):
+        # Integration contract: a control lock is not evidence of an empty hand.
+        # The native policy tests separately exercise those locks at dispatch.
+        source=(Path(__file__).resolve().parents[1]/'native/action_probe.h').read_text()
+        inspect=source.split('Observation inspect() {',1)[1].split('\n#ifdef BWV_HELD_ACTIONS\nbool has_mushroom_sequence',1)[0]
+        identity=inspect.index('obs.held=held;obs.held_table=word(held);')
+        eligibility=inspect.index('obs.held_can_bring_home=!obs.held_home_blocker;')
+        for reason in ('script_owns_creature','paused','script_camera_or_unknown_scene',
+                       'temple','hand_mode_not_normal','training_attention'):
+            gate=inspect.index('obs.blocked="'+reason+'"')
+            self.assertLess(identity,gate,reason)
+            self.assertLess(eligibility,gate,reason)
+
+    def test_sniff_waits_through_control_block_without_losing_held_item(self):
+        h=HeldHarness('rock');h.probe['held_actions']['held_gesture_version']=1
+        h.enqueue('smell_held');deadline=h.pending.pending['expires']
+        h.probe.update(phase='unavailable',conditions_allow_action=False,
+                       candidates=[],reason='hand_mode_not_normal')
+        for _ in range(3):
+            h.now+=1;h.pending.advance(h.obs(),allowed=True)
+            self.assertFalse(h.sent)
+            self.assertEqual(h.pending.pending['expires'],deadline)
+        h.probe.update(phase='ready',conditions_allow_action=True,candidates=list(HELD_ACTIONS))
+        h.pending.advance(h.obs(),allowed=True)
+        h.pending.advance(h.obs(),allowed=True)
+        self.assertEqual(len(h.sent),1)
+        self.assertEqual(COMMAND.unpack(h.sent[0])[-2:],(26,7))
+
+    def test_waiting_sniff_still_cancels_on_release_scene_change_or_expiry(self):
+        for stop in ('release','replace','scene','expiry'):
+            h=HeldHarness('rock');h.probe['held_actions']['held_gesture_version']=1
+            h.enqueue('smell_held')
+            h.probe.update(phase='unavailable',conditions_allow_action=False,candidates=[])
+            h.pending.advance(h.obs(),allowed=True)
+            self.assertIsNotNone(h.pending.pending)
+            if stop in ('release','replace'):
+                h.probe['held_actions']['target_generation']=0 if stop=='release' else 8
+            if stop=='expiry':h.now+=31
+            h.pending.advance(h.obs(),allowed=stop!='scene')
+            self.assertIsNone(h.pending.pending,stop)
+            self.assertFalse(h.sent,stop)
+            self.assertEqual(h.pending.last['status'],{
+                'release':'cancelled_held_object_changed','replace':'cancelled_held_object_changed',
+                'scene':'cancelled_control_changed','expiry':'expired'}[stop])
+
     def test_old_bridge_does_not_grant_discard_even_if_listed(self):
         h=HeldHarness('tree');h.probe['held_actions'].pop('discard_version')
         self.assertNotIn('discard_held',h.pending.factory(h.obs()).offer()['candidates'])
@@ -77,7 +123,7 @@ class HeldActionTests(unittest.TestCase):
         self.assertEqual(COMMAND.unpack(h.sent[0])[-2:],(12,7))
 
     def test_each_food_command_uses_bound_v6_packet_and_only_once(self):
-        for action in HELD_ACTIONS:
+        for action in ('put_down','eat_held','discard_held'):
             code=ACTIONS[action]
             h=HeldHarness();h.enqueue(action);h.pending.advance(h.obs(),allowed=True)
             self.assertEqual(len(h.sent),1,action)

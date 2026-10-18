@@ -234,5 +234,5 @@ class ObjectDetailTests(unittest.TestCase):
         result=session.call('find_targets',{'kind':'field','limit':3,'scope':'distant','action':'move_to','miracle':None,'center':None,'object_id':'field-far'})
         self.assertEqual(called,[('field-far','move_to')])
         self.assertEqual(result['action_targets'][0]['object_id'],'field-far')
-        selected=session.call('move_to',{'destination':{'target_id':result['action_targets'][0]['target_id']}})
+        selected=session.call('move_to',{'target':result['action_targets'][0]['object_id']})
         self.assertEqual(selected['status'],'selected_pending_final_reply')

@@ -46,14 +46,14 @@ int main() {
     c.generation=scene.generation;assert(scene.queue(c,110));
     scene.observe(1,11,false,"cutscene",115);scene.observe(1,11,true,"",120);
     assert(!scene.dispatch(c,121)); // a scene transition still revokes the queued command
-    bool field_water=false,object_water=false,field_poo=false,social_dance=false;
+    bool field_water=false,object_water=false,field_poo=false,social_dance=false,drinking=false;
     const auto& vomit=world_recipes[world_recipe_count-1];
     assert(!std::strcmp(vomit.name,"vomit") && !std::strcmp(vomit.label,"Puke"));
     assert(vomit.plan==50 && vomit.constructor==0x4A0280 && vomit.self && !vomit.kinds && !vomit.spell);
     assert(!std::strcmp(throw_kind_name(12),"field"));
     for(size_t i=0;i<world_recipe_count;++i) {
         const auto& r=world_recipes[i];assert(r.plan<328 && r.spell<=41 && r.constructor && (r.self||r.kinds));
-        if(r.body_animation>=0)assert(r.body_animation>=200 && r.body_animation<=204 && r.plan==75 && r.self && !r.kinds && !r.spell);
+        if(r.body_animation>=0)assert(individual_gesture_argument(r.body_animation) && r.plan==75 && r.self && !r.kinds && !r.spell);
         if(!std::strcmp(r.name,"cast_water_field")) {
             field_water=true;assert(r.plan==305 && r.spell==22 && r.constructor==0x4B6EA0 && r.kinds==(1u<<12));
         }
@@ -68,6 +68,12 @@ int main() {
             assert(r.plan==309 && r.constructor==0x49C9A0 && !r.self && !r.spell && r.kinds==(1u<<3));
             assert(!std::strcmp(r.label,"DanceAmorouslyWithVillagers"));
         }
+        if(!std::strcmp(r.name,"drink")) {
+            drinking=true;
+            assert(r.plan==55 && r.constructor==0x4A15F0 && r.self && !r.kinds && !r.spell);
+            assert(r.body_animation<0 && !r.held_category);
+            assert(!std::strcmp(r.label,"DrinkFromTheSea"));
+        }
         if(!std::strcmp(r.name,"attack") || !std::strcmp(r.name,"poo_on")
                 || !std::strcmp(r.name,"cast_food") || !std::strcmp(r.name,"cast_water_object")
                 || !std::strcmp(r.name,"cast_wood"))
@@ -76,9 +82,37 @@ int main() {
         assert(std::strcmp(r.name,"show_learned_lesson")); // same animation as scratch, not another gesture
         for(size_t j=0;j<i;++j)assert(std::strcmp(r.name,world_recipes[j].name));
     }
-    assert(field_water && object_water && field_poo && social_dance);
+    assert(field_water && object_water && field_poo && social_dance && drinking);
+    // Expected individual slots from the supported engine's native callers;
+    // do not derive this fixture from the production enum or recipe ordering.
+    const struct { const char* name; int animation; } gestures[]={
+        {"howl",217},{"laugh",218},{"cry",219},{"show_realization",220},{"pray",221},
+    };
+    for(const auto& expected:gestures) {
+        size_t matches=0;
+        for(const auto& r:world_recipes)if(!std::strcmp(r.name,expected.name)) {
+            ++matches;
+            assert(r.body_animation==expected.animation && r.constructor==0x4A4280);
+        }
+        assert(matches==1);
+    }
     const auto& fish=world_recipes[0];
     assert(!std::strcmp(fish.name,"fish") && fish.plan==155 && fish.self && !fish.kinds);
+    const struct { const char* name; uint32_t plan,constructor,kinds; bool self,hand; } deliveries[]={
+        {"fish_to_hand",259,0x4BA4B0,0,true,true},
+        {"fish_home",259,0x4BA4B0,0,true,false},
+        {"fish_to_storage",29,0x4AB610,1u<<16,false,false},
+        {"fish_to_worship",300,0x4B8510,1u<<24,false,false},
+    };
+    for(const auto& expected:deliveries) {
+        size_t matches=0;
+        for(const auto& r:world_recipes)if(!std::strcmp(r.name,expected.name)) {
+            ++matches;
+            assert(r.plan==expected.plan && r.constructor==expected.constructor && r.kinds==expected.kinds);
+            assert(r.self==expected.self && r.fish_to_hand==expected.hand && !r.held_category && !r.spell);
+        }
+        assert(matches==1);
+    }
     // Physical temple parts must not be rejected merely because the public kind
     // is temple. Only the actual Citadel/Flock containers lack the Object ABI.
     const auto fake_type=[](uintptr_t object,const char* name) {
@@ -88,7 +122,8 @@ int main() {
     for(const auto& r:world_recipes) {
         for(unsigned kind=1;kind<=target_kind_count;++kind) {
             const ThrowPoint physical{300,400,500,kind,20};
-            assert(world_target_supported(r,physical,fake_type)==bool(r.kinds&(1u<<kind)));
+            assert(world_target_supported(r,physical,fake_type)==bool((r.kinds&(1u<<kind))
+                && (kind!=30 || r.plan==134 || r.plan==122)));
         }
         for(const ThrowPoint marker : {ThrowPoint{100,400,500,6,20},ThrowPoint{200,400,500,15,20}}) {
             const bool supported=(r.kinds&(1u<<marker.kind)) && (r.plan==122 || r.plan==49);
@@ -96,7 +131,12 @@ int main() {
         }
         assert(!world_target_supported(r,{300,400,500,target_kind_count+1,20},fake_type));
     }
-    assert(world_recipe_count*(known_target_capacity+1)<=WorldOffers::capacity);
+    size_t maximum_offers=0;
+    for(const auto& r:world_recipes) {
+        maximum_offers+=(r.self?1:0)+(r.kinds?known_target_capacity:0);
+        if(r.plan==122 || r.plan==134)maximum_offers+=32; // separate gate network
+    }
+    assert(maximum_offers<=WorldOffers::capacity);
     // A dense stand of trees must not remove a field or dispenser from choices.
     NearbyTargets nearby;
     for(uintptr_t i=1;i<=30;++i)nearby.add({i,100+i,200+i,1,double(i)});

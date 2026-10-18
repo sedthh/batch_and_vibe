@@ -1,4 +1,4 @@
-// Original guarded experiment policy; no engine implementation or instructions.
+// Command admission and single-use execution; no engine implementation.
 #pragma once
 #include <cstdint>
 #include "throw_targets.h"
@@ -74,11 +74,6 @@ struct Policy {
         return false;
     }
     uint32_t allowed_actions = 7;
-    uint32_t queued_action = 0;
-    // Cast/position slots plus the live hand target. Unrelated action-mask
-    // changes must not revoke these still-valid, individually bound requests.
-    uint64_t bound_floor[5]{};
-    void revoke_bound() { for (auto& floor : bound_floor) floor=generation; }
     const char* reason = "waiting_for_game";
 
     explicit Policy(bool repeat = false, bool catalog = false, bool held = false)
@@ -93,35 +88,27 @@ struct Policy {
     void finish(uint64_t now, bool safely_ended, Phase result = Phase::finished) {
         if (!consumed || terminal) return;
         terminal=true; verified_exit=safely_ended; finished_at=now;
-        phase=result; ++generation; revoke_bound();
+        phase=result; ++generation;
     }
 
     void actions(uint32_t mask) {
-        if (mask!=allowed_actions) {
-            // A bound casting/world command must not be revoked because an
-            // unrelated gesture or walking capability changed before this tick.
-            // Its own capability, target, identity and scene are still checked.
-            const bool bound_unchanged=phase==Phase::queued && (queued_action==3 || (queued_action>=17 && queued_action<=20))
-                && (allowed_actions&(1u<<(queued_action-1))) && (mask&(1u<<(queued_action-1)));
-            const auto changed=allowed_actions^mask;
-            allowed_actions=mask;if(!bound_unchanged)++generation;
-            for(unsigned i=0;i<4;++i) if(changed&(1u<<(16+i))) bound_floor[i]=generation;
-            if(changed&4u)bound_floor[4]=generation;
-        }
+        // Availability is checked for the selected action at queue and dispatch.
+        // Routine changes to other actions are not a loss of player control.
+        allowed_actions=mask;
     }
 
     void observe(uint64_t session, uintptr_t identity, bool safe, const char* blocked, uint64_t now) {
         if (session != epoch || identity != creature) {
-            epoch = session; creature = identity; ++generation; revoke_bound();
+            epoch = session; creature = identity; ++generation;
             available = false;
             // A changed identity cannot establish how an outstanding action ended.
             if (consumed) verified_exit=false;
             else phase=Phase::unavailable;
         }
-        if (safe != available) { ++generation; revoke_bound(); available = safe; }
+        if (safe != available) { ++generation; available = safe; }
         if (consumed && terminal && verified_exit && repeat_enabled && safe
                 && now>=finished_at && !cooldown_remaining(now)) {
-            consumed=false; terminal=false; verified_exit=false; ++generation; revoke_bound();
+            consumed=false; terminal=false; verified_exit=false; ++generation;
         }
         reason = !safe ? blocked : !consumed ? "manual_test_only" :
             !terminal ? "action_in_progress" : !repeat_enabled ? "restart_required_for_another_test" :
@@ -139,22 +126,18 @@ struct Policy {
         const bool wake = version == 3 && command.action == 4;
         const bool object = version == 4 && command.action == 5;
         const bool held = version == 6 && held_enabled
-            && (command.action==12 || command.action==14 || command.action==21);
+            && (command.action==12 || command.action==14 || (command.action>=21 && command.action<=27));
         const bool throwing = version==7 && held_enabled && command.action==15;
         const bool pickup = version==8 && held_enabled && command.action==16;
         const bool miracle = version==9 && held_enabled && (command.action==17 || command.action==18);
         const bool world = version==10 && held_enabled && command.action==19;
         const bool position=version==11 && held_enabled && command.action==20 && !held_target_generation;
-        const bool hand=conversation && command.action==3;
-        const bool generation_valid=(miracle || world || position || hand)
-            ? command.generation>=bound_floor[hand?4:command.action-17] && command.generation<=generation
-            : command.generation==generation;
         if (command.magic != 0x42575041 || (command.interrupts() && !priority)
                 || (command.player_command() && !repeat_enabled)
                 || (command.night_priority() && !command.player_command())
                 || command.pace()>Pace::run || (command.pace()!=Pace::automatic && !pace_action(command.action))
                 || (version != 1 && !conversation && !wake && !object && !held && !throwing && !pickup && !miracle && !world && !position)
-                || (command.action < 1 || command.action > 21)
+                || (command.action < 1 || command.action > 27)
                 || (command.action>=6 && !catalog && !held && !throwing && !pickup && !miracle && !world && !position)
                 || (command.action == 4 && !wake)
                 || (command.action == 5 && !object)
@@ -172,12 +155,12 @@ struct Policy {
                     : command.reserved != 0)
                 || (consumed && !priority) || !available
                 || (phase != Phase::ready && !(priority && consumed && phase!=Phase::queued))
-                || command.epoch != epoch || !generation_valid
+                || command.epoch != epoch || command.generation != generation
                 || now < command.offered_at || now-command.offered_at > (conversation ? 30000u : 1000u)
                 || now < offered_at || now-offered_at > 1000
                 || command.offered_at > offered_at) return false;
         if(priority) { consumed=false;terminal=false;verified_exit=false; }
-        queued_action=command.action;phase = Phase::queued;
+        phase = Phase::queued;
         return true;
     }
 
@@ -192,7 +175,7 @@ struct Policy {
             return false;
         }
         consumed = true; terminal=false; verified_exit=false;
-        accepted_at = now; ++attempts; ++generation; revoke_bound(); phase = Phase::accepted;
+        accepted_at = now; ++attempts; ++generation; phase = Phase::accepted;
         return true;
     }
 };

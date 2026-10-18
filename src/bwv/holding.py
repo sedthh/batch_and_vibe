@@ -4,7 +4,8 @@ import math
 from typing import Literal
 from .spells import SPELLS
 from .drives import CreatureDrive
-from .held_objects import HELD_KINDS, RUNTIME_HELD_DETAILS
+from .held_objects import HELD_KINDS
+from .object_types import OBJECT_SUBTYPES
 
 
 @dataclass(frozen=True)
@@ -49,7 +50,7 @@ class HoldingContext:
             raise ValueError('Held-object identity and holding state disagree')
         if self.kind not in (None, *HELD_KINDS) or (self.kind is not None and self.holding is not True):
             raise ValueError('Invalid held-object kind')
-        if self.object_type is not None and (self.object_type not in RUNTIME_HELD_DETAILS.values()
+        if self.object_type is not None and (self.object_type not in OBJECT_SUBTYPES
                                             or self.holding is not True):
             raise ValueError('Invalid held-object detail')
         if self.active_plan not in (None, 'eat', 'take_from_player', 'examine_held_object', 'plant_tree'):

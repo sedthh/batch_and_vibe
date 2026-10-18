@@ -42,7 +42,7 @@ class NearbyPeopleTests(unittest.TestCase):
             'sex':'female','age_years':32,'is_actor':False,'script_controlled':False})
         current=frame();current['observation']['surroundings']=asdict(context)
         session=DirectCreatureToolSession(lambda:current)
-        obj=session.call('inspect_surrounding',{'kind':'villager','limit':3})['objects'][0]
+        obj=session.call('find_objects',{'kind':'villager','limit':3, 'scope':'nearby', 'detail':'detailed'})['objects'][0]
         self.assertEqual(obj['person'],person)
         self.assertNotIn('life_status',person)
 

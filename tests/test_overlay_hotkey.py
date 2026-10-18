@@ -5,6 +5,7 @@ from unittest import TestCase
 from unittest.mock import Mock
 
 from bwv.overlay_windows import Windows, OverlayWindow, hotkey_loop
+from bwv.overlay import ReplyReveal
 
 
 class HotkeyThreadTests(TestCase):
@@ -54,6 +55,7 @@ class HotkeyThreadTests(TestCase):
         window.heading=Mock();window.indicator=Mock();window.message=Mock()
         window.message_box=Mock();window.message_scroll=Mock()
         window.message_text='Still here.';window.form=Mock();window.root=Mock()
+        window.reply_reveal=ReplyReveal();window._message_key=None
         window.form.winfo_reqheight.return_value=28
         window.geometry=None;window.want_hotkey=threading.Event()
         window.entry=Mock();window.send=Mock();window.diagnostics=Mock()

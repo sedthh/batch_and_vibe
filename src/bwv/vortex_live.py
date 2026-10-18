@@ -93,7 +93,7 @@ def read_portals(reader, session, creature, player, creature_position, hand_posi
                 if point is None or not math.isfinite(altitude):raise ValueError('Invalid portal position')
                 distance = math.hypot(point['x'] - creature_position[0], point['z'] - creature_position[1])
                 hand_distance = math.hypot(point['x'] - hand_position[0], point['z'] - hand_position[1]) if hand_position else None
-                if distance > 360 and (hand_distance is None or hand_distance > 360):continue
+                if runtime != b'.?AVMagicTeleport@@' and distance > 360 and (hand_distance is None or hand_distance > 360):continue
                 metadata = {'route': 'same_island', 'direction': 'two_way', 'temporary': True}
                 if runtime != b'.?AVMagicTeleport@@':
                     entrance = runtime == b'.?AVLandscapeVortexIn@@'
@@ -110,6 +110,15 @@ def read_portals(reader, session, creature, player, creature_position, hand_posi
                     position=point, lookup_handle=obj, portal=metadata))
             if any(reader.read(a, len(value)) != value for a, value in checks):
                 raise ValueError('Portal list changed while reading')
+            if allowed == {b'.?AVMagicTeleport@@'}:
+                # The owner's native network supplies real destinations even
+                # when its other gates are beyond the current local view.
+                if not any(o.distance_engine_units <= 360 or
+                        o.distance_to_god_hand_engine_units is not None and o.distance_to_god_hand_engine_units <= 360
+                        for o in group):group=[]
+                identities=[o.object_id for o in group]
+                for obj in group:
+                    obj.portal['connected_exit_ids']=[identity for identity in identities if identity != obj.object_id]
             items.extend(group)
         except (OSError, ValueError):errors += 1
     if not any(o.portal.get('deposits') is not None for o in items):

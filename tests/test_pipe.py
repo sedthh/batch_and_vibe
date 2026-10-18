@@ -7,8 +7,9 @@ import json
 import threading
 import time
 import unittest
+from unittest.mock import Mock, patch
 
-from bwv.pipe import snapshot
+from bwv.pipe import snapshot, _connect_snapshot
 
 
 @contextmanager
@@ -61,6 +62,43 @@ def server(payload):
 
 @unittest.skipUnless(os.name == "nt", "Windows named pipes")
 class PipeTests(unittest.TestCase):
+    def test_competing_reader_between_wait_and_open_retries_same_deadline(self):
+        kernel=Mock()
+        kernel.WaitNamedPipeW.return_value=True
+        kernel.CreateFileW.side_effect=[wintypes.HANDLE(-1).value,123]
+        with patch('bwv.pipe.ctypes.get_last_error',return_value=231), \
+                patch('bwv.pipe.time.monotonic',side_effect=[10,10.1,10.2]), \
+                patch('bwv.pipe.time.sleep') as sleep:
+            self.assertEqual(_connect_snapshot(kernel,'synthetic-pipe',12),123)
+        self.assertEqual(kernel.CreateFileW.call_count,2)
+        waits=[call.args[1] for call in kernel.WaitNamedPipeW.call_args_list]
+        self.assertEqual(waits[0],2000)
+        self.assertLess(waits[1],waits[0])
+        sleep.assert_called_once_with(.01)
+
+    def test_busy_connection_cannot_extend_deadline(self):
+        kernel=Mock()
+        kernel.WaitNamedPipeW.return_value=True
+        kernel.CreateFileW.return_value=wintypes.HANDLE(-1).value
+        with patch('bwv.pipe.ctypes.get_last_error',return_value=231), \
+                patch('bwv.pipe.time.monotonic',side_effect=[10,10.1,12]), \
+                patch('bwv.pipe.time.sleep'):
+            with self.assertRaises(TimeoutError):_connect_snapshot(kernel,'synthetic-pipe',12)
+        kernel.CreateFileW.assert_called_once()
+
+    def test_connection_loss_and_access_denial_are_not_retried(self):
+        for wait_ok,error_code in ((False,2),(True,5)):
+            kernel=Mock()
+            kernel.WaitNamedPipeW.return_value=wait_ok
+            kernel.CreateFileW.return_value=wintypes.HANDLE(-1).value
+            with patch('bwv.pipe.ctypes.get_last_error',return_value=error_code), \
+                    patch('bwv.pipe.time.monotonic',return_value=10), \
+                    patch('bwv.pipe.time.sleep') as sleep:
+                with self.assertRaises(OSError):_connect_snapshot(kernel,'synthetic-pipe',12)
+            kernel.WaitNamedPipeW.assert_called_once()
+            self.assertEqual(kernel.CreateFileW.call_count,int(wait_ok))
+            sleep.assert_not_called()
+
     def test_expanded_catalog_larger_than_old_64k_limit_is_received_intact(self):
         data={'world_actions':{'offers':[{'token':i,'action':'poo_on','kind':'field',
               'distance_engine_units':20.0} for i in range(1024)]}}

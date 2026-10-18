@@ -128,7 +128,7 @@ class LiveDummyProvider(DemoProvider):
 class LiveChatRuntime:
     def __init__(self, state_dir=None, *, clock=time.monotonic, names_reader=None, provider=None,
                  settings=None, settings_path=None, action_factory=None, wake_factory=None, wait_actions=False,
-                 request_details=None):
+                 request_details=None, thinking_pause_factory=None):
         self.loop = asyncio.get_running_loop()
         self.clock = clock
         self.request_details = request_details
@@ -184,7 +184,8 @@ class LiveChatRuntime:
             action_factory=self.action_factory,
             on_question=self._question_action if wake_factory or self.pending_actions else None,
             wake_followup_actions=self.pending_actions is not None,session_greetings=True,
-            wait_for_context=self._wait_for_turn_context)
+            wait_for_context=self._wait_for_turn_context,thinking_pause_factory=thinking_pause_factory)
+        self.broker.speech.reenable_cut_content = self.settings.reenable_cut_content if self.settings else True
         self.updates = self._new_updates()
         self.automatic = not self.is_llm
         self.source = None
@@ -249,6 +250,10 @@ class LiveChatRuntime:
         try:
             async with asyncio.timeout(self.gate.preserve_stale_seconds):
                 while True:
+                    # A detail scan can outlast the fast observation's freshness
+                    # window. Wait for that same feed to catch up, without
+                    # repeating the scan or the provider request.
+                    await self._wait_for_context()
                     obs=self.gate.observation
                     if (self.broker._epoch!=epoch or obs is None
                             or (obs.session,obs.creature_id)!=identity or self.question_scene_blocked()
@@ -264,7 +269,9 @@ class LiveChatRuntime:
 
     async def _wait_for_turn_context(self, *, allow_paused=False):
         await self._wait_for_context(allow_paused=allow_paused)
-        if not allow_paused:await self._refresh_details(force=True)
+        if not allow_paused:
+            await self._refresh_details(force=True)
+            await self._wait_for_context()
 
     def _turn_activity(self, stage, request):
         if stage == 'accepted':
@@ -317,8 +324,9 @@ class LiveChatRuntime:
             fresh()
             return targets
         async def validate_async():
+            # The turn already requested details once. Tools use the continuously
+            # refreshed view; validation must not trigger another island scan.
             await self._wait_for_context()
-            await self._refresh_details()
             fresh()
         return DirectCreatureToolSession(fresh,memory=self.memory,target_resolver=resolve,
             async_target_resolver=resolve_async,async_validator=validate_async,
@@ -604,7 +612,10 @@ class LiveChatRuntime:
         except ToolContextUnavailable:
             raise ChatNotSubmitted(reason='observation_refresh_timeout') from None
         obs = self.gate.observation
-        if 'expected_identity' in payload and obs is not None:
+        # A missing reading says nothing about who the recipient is. Let the
+        # overlay retain/retry an unsent message until a verified identity returns.
+        if ('expected_identity' in payload and obs is not None
+                and obs.connected and obs.creature_id is not None):
             if (expected[0] != obs.session or
                     (obs.creature_id is not None and expected[1] != obs.creature_id)):
                 raise ChatNotSubmitted(retryable=False,reason='recipient_changed')
@@ -771,6 +782,7 @@ class LiveChatRuntime:
             'action_mode':(('bounded_model_question_actions' if self.is_llm else 'bounded_dummy_question_actions') if self.pending_actions else
                            'single_attempt_questions' if self.action_factory else 'disabled'),
             'action_dispatch':deepcopy(self.broker.last_execution),
+            'thinking_pause':self.broker.thinking_pause_status,
             'pending_action':self.pending_actions.snapshot() if self.pending_actions else None,
             'wake_on_question_enabled':self.wake_factory is not None,
             'wake_dispatch':deepcopy(self.broker.last_wake),
@@ -915,6 +927,7 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
     read_source = source_reader if source_reader is not None else InspectorSource(source_url).read
     action_factory = None
     wake_factory = None
+    thinking_pause_factory = None
     actions_enabled = action_pid is not None or current_action_pid is not None
     if actions_enabled:
         from .action_probe import ConversationActionAdapter, QuestionWakeAdapter, TreeApproachAdapter, HeldActionAdapter
@@ -926,6 +939,10 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
             if type(pid) is not int or not 0 < pid <= 0xffffffff or obs.session.partition(':')[0] != str(pid):
                 raise ValueError('Game detached or changed before action selection')
             return pid
+        if config is not None:
+            from .thinking_pause import ThinkingPause
+            def thinking_pause_factory(obs):
+                return ThinkingPause(process_for(obs), obs)
         def action_factory(obs, *, expected_hand_generation=None, expected_object_generation=None, expected_held_generation=None,expected_throw_generation=None,expected_pickup_generation=None,miracle_action=None,expected_miracle_target=None,wake_action=False,world_action=None,expected_world_token=None,destination=None,pace=None,player_command=False):
             action_pid = process_for(obs)
             priority = dict(player_command=player_command, night_priority=obs.environment.time_of_day == 'night')
@@ -985,7 +1002,8 @@ async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None
     try:
         runtime = LiveChatRuntime(state_dir, provider=provider,settings=config or dummy_settings,
                                   settings_path=settings_path, action_factory=action_factory,
-                                  wake_factory=wake_factory,wait_actions=actions_enabled,request_details=request_details)
+                                  wake_factory=wake_factory,wait_actions=actions_enabled,request_details=request_details,
+                                  thinking_pause_factory=thinking_pause_factory)
         if automatic is not None:
             runtime.automatic = automatic
         if debug_session is not None:

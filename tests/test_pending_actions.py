@@ -61,6 +61,22 @@ class Harness:
 class PendingActionTests(unittest.TestCase):
     def setUp(self):self.h=Harness()
 
+    def test_takeover_after_reply_cancels_pending_action_before_native_dispatch(self):
+        h=self.h;h.probe['thinking_pause']={'version':2,'control_revision':4}
+        offer=h.pending.factory(h.obs());offer.offer();offer.bind_control_revision(4)
+        offer.dispatch({'candidate':'approach_hand'})
+        h.pending.advance(h.obs(),allowed=False,temporary_unavailable=True)
+        h.probe['thinking_pause']['control_revision']=5
+        h.pending.advance(h.obs(),allowed=True)
+        self.assertFalse(h.sent)
+        self.assertEqual(h.pending.snapshot()['status'],'cancelled_control_changed')
+        self.assertIsNone(h.pending.pending)
+        # An intentional later request binds the new revision and remains usable.
+        offer=h.pending.factory(h.obs());offer.offer();offer.bind_control_revision(5)
+        offer.dispatch({'candidate':'approach_hand'})
+        h.pending.advance(h.obs(),allowed=True)
+        self.assertEqual(len(h.sent),1)
+
     def test_negative_queue_ack_refreshes_offer_without_duplicate_execution(self):
         h=self.h;calls=[]
         def race(pid,packet):
@@ -241,6 +257,30 @@ class PendingActionTests(unittest.TestCase):
         h.pending.native_factory=factory;h.now+=1
         h.pending.advance(h.obs(),allowed=True)
         self.assertEqual(len(h.sent),1)
+
+    def test_fresh_native_validation_is_not_rejected_by_older_cached_view(self):
+        for change in ('none','hand_target','identity','control','deadline'):
+            with self.subTest(change=change):
+                h=Harness();h.enqueue('approach_hand')
+                old=h.source();h.pending.source=lambda:old
+                factory=h.pending.native_factory
+                def slow_capture(obs,**kwargs):
+                    dispatcher=factory(obs,**kwargs)
+                    capture=dispatcher.offer
+                    def offer():
+                        result=capture()
+                        h.now+=1.2  # Native offer lives 30s; Python cache is now old.
+                        if change=='hand_target':h.probe['conversation_actions']['hand_target_generation']+=1
+                        if change=='identity':h.probe['conversation_actions']['creature_handle']+=1
+                        if change=='control':h.probe['generation']+=1
+                        if change=='deadline':h.now+=31
+                        return result
+                    dispatcher.offer=offer
+                    return dispatcher
+                h.pending.native_factory=slow_capture
+                h.pending.advance(h.obs(),allowed=True)
+                self.assertEqual(len(h.sent),int(change=='none'))
+                if change=='none':self.assertEqual(h.pending.last['status'],'queued')
 
     def test_unknown_receipt_never_retries(self):
         h=self.h

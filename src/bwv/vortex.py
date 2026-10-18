@@ -37,7 +37,12 @@ def portal_details(value):
             result['deposits'] = clean
         return result
     if route == 'same_island':
-        return {'route': route, 'direction': 'two_way', 'temporary': True}
+        result = {'route': route, 'direction': 'two_way', 'temporary': True}
+        exits=value.get('connected_exit_ids')
+        if isinstance(exits,list) and len(exits)<=31 and all(
+                isinstance(identity,str) and re.fullmatch('[0-9a-f]{24}',identity) for identity in exits):
+            result['connected_exit_ids']=list(dict.fromkeys(exits))
+        return result
     return {}
 
 

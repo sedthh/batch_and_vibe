@@ -9,8 +9,35 @@ from test_action_tools import action_request
 from test_creature_tools import frame
 from test_world_actions import WorldHarness
 
+TOY_NAMES=('toy', 'toys', 'ball', 'toy balls', 'football', 'soccer balls',
+           'beach ball', 'beachballs', 'rubber balls', 'playthings',
+           'cuddly toy', 'cuddly toys', 'teddy', 'teddies', 'teddy bears',
+           'soft toys', 'stuffed toys', 'stuffed animals', 'plush toys', 'plushies',
+           'die', 'dice', 'toy die', 'toy dice', ' Toy-Die ')
+
 
 class ObjectAliasTests(unittest.TestCase):
+    def test_toy_aliases_keep_player_hand_and_creature_searches_separate(self):
+        data=frame()
+        toy={'object_id':'hand-side-toy','kind':'toy','distance_engine_units':500,
+             'distance_to_god_hand_engine_units':0,'details':{'health_engine_units':1.0}}
+        tree={'object_id':'creature-side-tree','kind':'tree','distance_engine_units':3,
+              'distance_to_god_hand_engine_units':497}
+        data['observation']['surroundings'].update(known_objects=[tree,toy],
+            nearby_known_objects=[tree],god_hand_objects=[toy],god_hand_available=True)
+        session=DirectCreatureToolSession(lambda:deepcopy(data))
+        for alias in TOY_NAMES:
+            with self.subTest(alias=alias):
+                args={'type':alias,'scope':'nearby','detail':'detailed','limit':10}
+                found=session.call('find_objects',{**args,'center':'god_hand'})['objects']
+                self.assertEqual([o['object_id'] for o in found],['hand-side-toy'])
+                self.assertEqual(found[0]['type'],'toy')
+                self.assertNotIn('object_type',found[0]) # Alias is not subtype evidence.
+                self.assertEqual(session.call('find_objects',{**args,'center':'creature'})['objects'],[])
+                self.assertFalse(target_matches(alias,tree))
+        self.assertTrue(kind_matches('miracle ball','miracle_bubble'))
+        self.assertFalse(kind_matches('miracle ball','toy'))
+
     def test_wood_targets_completed_workshops_stores_and_unfinished_buildings(self):
         for alias,kind,complete in (('scaffolding maker','workshop',True),
                 ('warehouse','storage',True),('town centre','town_centre',False),('house','house',True)):
@@ -31,7 +58,7 @@ class ObjectAliasTests(unittest.TestCase):
                 target=found['action_targets'][0]
                 self.assertEqual(target['type'],kind.replace('_',' '))
                 self.assertEqual(target['details']['construction_complete'],complete)
-                result=session.call('do_action',{'action':'cast_miracle','miracle':'wood','target':target['target_id']})
+                result=session.call('do_action',{'action':'cast_miracle','miracle':'wood','target':target['object_id']})
                 self.assertEqual(result['status'],'selected_pending_final_reply')
                 offer.dispatch(session.finalize_reply({})['decision'])
                 h.pending.advance(h.obs(),allowed=True)
@@ -61,7 +88,10 @@ class ObjectAliasTests(unittest.TestCase):
         for session_type in (CreatureToolSession,DirectCreatureToolSession):
             session=session_type(lambda:deepcopy(data))
             for center in ('creature','god_hand'):
-                result=session.call('inspect_surrounding',{'kind':'flames','limit':10,'center':center})
+                if session_type is CreatureToolSession:
+                    result=session.call('inspect_surrounding',{'kind':'flames','limit':10,'center':center})
+                else:
+                    result=session.call('find_objects',{'type':'flames','limit':10,'center':center,'scope':'nearby','detail':'detailed'})
                 self.assertEqual([o['object_id'] for o in result['objects']],['burning-house'])
                 self.assertEqual(result['objects'][0].get('type',result['objects'][0].get('kind')),'house')
 
@@ -113,7 +143,8 @@ class ObjectAliasTests(unittest.TestCase):
             self.assertEqual({o['object_id'] for o in result['objects']}, {'totem-1','town_centre-1'})
 
     def test_alias_search_returns_same_action_target_and_dispatches_it(self):
-        for alias,kind in [('warehouse','storage'), ('town center','totem'), ('totem','town_centre')]:
+        for alias,kind in [('warehouse','storage'), ('town center','totem'), ('totem','town_centre'),
+                           *((name,'toy') for name in TOY_NAMES)]:
             with self.subTest(alias=alias,kind=kind):
                 h=WorldHarness()
                 entry=next(e for e in h.probe['world_actions']['offers'] if e['action']=='move_to')
@@ -122,7 +153,7 @@ class ObjectAliasTests(unittest.TestCase):
                 request=action_request(data['candidates']);request.current['snapshot'].update(data)
                 s=DirectCreatureToolSession(frame,action_candidates=data['candidates']);s.bind_request(request)
                 found=s.call('find_targets',{'kind':alias,'limit':3})['action_targets'][0]
-                inspected=s.call('inspect_surrounding',{'kind':alias,'limit':3,'action':'move_to'})['action_targets'][0]
+                inspected=s.call('find_targets',{'kind':alias,'limit':3,'action':'move_to', 'scope':'nearby'})['action_targets'][0]
                 self.assertEqual(found,inspected)
                 self.assertEqual(found['type'],kind.replace('_',' '))
                 self.assertFalse(h.sent)

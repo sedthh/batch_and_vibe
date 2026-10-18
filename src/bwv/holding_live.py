@@ -6,8 +6,8 @@ import time
 
 from .control import ControlObservation
 from .holding import HoldingContext
-from .object_types import object_kind
-from .held_objects import RUNTIME_HELD_KINDS, RUNTIME_HELD_DETAILS
+from .object_types import object_kind, object_subtype
+from .held_objects import RUNTIME_HELD_KINDS
 from .drives import DRIVES, CreatureDrive
 from .pipe import snapshot
 from .training_live import TrainingReader, CREATURE_OWNER, CREATURE_MENTAL
@@ -89,11 +89,14 @@ def read_holding(reader: TrainingReader, observer: dict | None = None) -> Holdin
                     descriptor = reader.word(reader.word(table - 4) + 12)
                     return reader.read(descriptor + 8, 64).split(b'\0', 1)[0]
                 kind = KINDS.get(name) or object_kind(reader, held, name, runtime_type) or 'object'
-                object_type = RUNTIME_HELD_DETAILS.get(name)
+                try:object_type = object_subtype(reader, held, name, runtime_type)
+                except (OSError, ValueError):detail_errors += 1
                 item_id = hashlib.sha256(f'{session}:{creature}:held:{held}'.encode()).hexdigest()[:24]
                 object_id=hashlib.sha256(f'{session}:{creature}:{held}'.encode()).hexdigest()[:24]
                 from .object_details_live import read_details
-                try:metadata,detail_errors=read_details(reader,held,name)
+                try:
+                    metadata,errors=read_details(reader,held,name)
+                    detail_errors+=errors
                 except (OSError,ValueError):detail_errors+=1
                 if kind=='animal':
                     from .animal_types import ANIMAL_TYPES

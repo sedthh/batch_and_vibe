@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import re
 import time
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -37,6 +38,36 @@ class ChatInputHistory:
             self.index=None
             return self.draft
         return self.items[self.index]
+
+
+class ReplyReveal:
+    """Reveal a single reply in word-sized bursts, driven by the UI clock."""
+    interval = .27
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self.key=None;self.text='';self.ends=();self.started=0
+
+    def reveal(self, text, key, now):
+        if not text:
+            self.clear()
+            return ''
+        if key!=self.key or text!=self.text:
+            self.key=key;self.text=text;self.started=now
+            # At least ~32 characters per burst, at most twenty-four bursts. Keep
+            # words/Unicode intact and retain the exact reply, including spaces.
+            size=max(32,math.ceil(len(text)/24))
+            ends=[];previous=0
+            for match in re.finditer(r'\S+\s*',text):
+                end=match.end()
+                if end-previous>=size:
+                    ends.append(end);previous=end
+            if not ends or ends[-1]!=len(text):ends.append(len(text))
+            self.ends=tuple(ends)
+        step=min(len(self.ends)-1,int(max(0,now-self.started)/self.interval))
+        return self.text[:self.ends[step]]
 
 
 class OverlayClient:

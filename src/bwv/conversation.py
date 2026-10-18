@@ -343,11 +343,12 @@ class ConversationMemory:
 
 class CreatureSpeech:
     """Presentation state only; a proposal is never an execution confirmation."""
-    def __init__(self, seconds=15):
+    def __init__(self, seconds=15, *, reenable_cut_content=True):
         if seconds is not None and (type(seconds) not in (int, float)
                 or not math.isfinite(seconds) or seconds <= 0):
             raise ValueError('Invalid speech duration')
         self.seconds = seconds
+        self.reenable_cut_content = reenable_cut_content
         self._current = None
         self._last_answer = None
         self._last_message = None
@@ -388,7 +389,8 @@ class CreatureSpeech:
             self._silent_ticks = 0
 
     def publish(self, text, now, decision, *, source, dispatcher=None, execution=None):
-        expression = speech_expression(text, decision, dispatcher=dispatcher)
+        expression = speech_expression(text, decision, dispatcher=dispatcher,
+            reenable_cut_content=self.reenable_cut_content)
         text = display_speech(text)
         with self._lock:
             if expression is not None:
@@ -442,13 +444,15 @@ class ConversationBroker:
     def __init__(self, provider, gate, *, clock=time.monotonic, timeout=30,
                  max_questions=8, memory=None, speech_seconds=15, prompt_builder=current_prompt,
                  on_turn=None, action_factory=None, on_question=None, wake_followup_actions=False,
-                 session_greetings=False, wait_for_context=None):
+                 session_greetings=False, wait_for_context=None, thinking_pause_factory=None):
         if not math.isfinite(timeout) or timeout <= 0 or type(max_questions) is not int or max_questions < 1:
             raise ValueError('Invalid conversation limits')
         self.provider, self.gate, self.clock = provider, gate, clock
         self.prompt_builder = prompt_builder
         self.on_turn = on_turn
         self.wait_for_context = wait_for_context
+        self.thinking_pause_factory = thinking_pause_factory
+        self.thinking_pause_status = 'not_requested'
         # First integration is explicit-question QA only. Automatic planner
         # proposals still belong to their own executor and must not execute twice.
         self.action_factory = action_factory
@@ -610,6 +614,18 @@ class ConversationBroker:
             request = None
             dispatcher = None
             action_generation = None
+            thinking_pause = None
+            async def release_thinking():
+                nonlocal thinking_pause
+                pause, thinking_pause = thinking_pause, None
+                if pause is not None:
+                    try:
+                        await pause.close()
+                        self.thinking_pause_status = 'released'
+                    except (OSError, ValueError, TimeoutError):
+                        # Native timeout/disconnect cleanup remains independent
+                        # of the provider and of a lost release receipt.
+                        self.thinking_pause_status = 'release_unconfirmed'
             try:
                 # Wait before building the prompt/offer, preserving this one
                 # queued question while the observation feed keeps refreshing.
@@ -680,6 +696,21 @@ class ConversationBroker:
                     current['session_event'] = self.session_greeting.pending
                 request = ConversationRequest('god_question' if entry.question else 'observation',
                     self.memory.messages(system,current),current)
+                if self.thinking_pause_factory is not None and status.allowed:
+                    try:
+                        thinking_pause = self.thinking_pause_factory(obs)
+                        await thinking_pause.begin(self.timeout)
+                        self.thinking_pause_status = thinking_pause.status
+                    except (OSError, ValueError, TimeoutError):
+                        self.thinking_pause_status = 'unavailable'
+                        await release_thinking()
+                self._sync_identity()
+                if entry.future.cancelled() or entry.epoch != self._epoch:
+                    entry.future.cancel()
+                    continue
+                if thinking_pause is not None:
+                    unavailable = question_unavailable(self.gate.observation,self.clock())
+                    if unavailable:raise ValueError(unavailable)
                 self.calls_started += 1
                 if self.on_turn:self.on_turn('started',request)
                 self._last_message_observed_at = sample_time
@@ -694,6 +725,7 @@ class ConversationBroker:
                 completed, _ = await asyncio.wait({self._active},timeout=self.timeout)
                 if not completed:
                     self._active.cancel()
+                    await release_thinking()
                     if not entry.future.done():
                         entry.future.set_exception(TimeoutError('Conversation request timed out'))
                     # Keep this lane occupied if a provider ignores cancellation.
@@ -743,6 +775,22 @@ class ConversationBroker:
                 if paused_reply:decision={'candidate':None}
                 if entry.question is not None and dispatcher is None:
                     decision = {'candidate':None}  # Text exception never grants an action lease.
+                control_changed = (thinking_pause is not None
+                    and not await thinking_pause.action_allowed())
+                self._sync_identity()
+                if entry.epoch != self._epoch:
+                    raise RuntimeError('Conversation session changed; late reply discarded')
+                if entry.future.cancelled():continue
+                if control_changed:
+                    decision = {'candidate':None}
+                    # Do not announce a movement/cast we just cancelled. Keep
+                    # unrelated speech-only answers and memory operations usable.
+                    if raw_decision != {'candidate':None}:
+                        reply = {**reply, 'answer':"I'll follow your lead."}
+                        say = "I'll follow your lead." if entry.question is not None else ''
+                elif thinking_pause is not None and dispatcher is not None:
+                    bind_control = getattr(dispatcher,'bind_control_revision',None)
+                    if bind_control:bind_control(thinking_pause.control_revision)
                 self.memory.record(current,reply['answer'],decision,reply.get('memory'),say)
                 if entry.question is None:
                     # Count a completed model turn, not intermediate tool rounds.
@@ -760,7 +808,7 @@ class ConversationBroker:
                 ready_dispatcher = dispatcher
                 if dispatcher is not None:
                     final_status = self.gate.poll(self.clock())
-                    if not final_status.allowed or final_status.generation != action_generation:
+                    if control_changed or not final_status.allowed or final_status.generation != action_generation:
                         ready_dispatcher = None
                         self.last_execution = {'status': 'conversation_control_changed', 'queued': False}
                     elif decision != {'candidate': None}:
@@ -799,6 +847,7 @@ class ConversationBroker:
                 if not entry.future.done():
                     entry.future.set_exception(RuntimeError(self.last_error))
             finally:
+                await release_thinking()
                 self._active = None
                 self._answer_entry = None
                 self._answer_started_at = None

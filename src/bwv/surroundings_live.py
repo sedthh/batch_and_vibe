@@ -1,5 +1,5 @@
 """Bounded creature-belief traversal and current proximity, without game calls."""
-from .object_types import OBJECT_KINDS, object_kind, engine_class_name
+from .object_types import OBJECT_KINDS, object_kind, object_subtype, engine_class_name
 from .object_fire import read_object_fire
 from dataclasses import dataclass
 import hashlib
@@ -183,6 +183,10 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
                             owner_id=owner_link=None
                             person=None
                             metadata=None
+                            subtype=None
+                            if obj_kind=='toy':
+                                try:subtype=object_subtype(reader,obj,runtime_type,kind)
+                                except (OSError,ValueError):detail_errors+=1
                             if detailed:
                                 try:
                                     metadata,errors=read_details(reader,obj,runtime_type)
@@ -218,7 +222,8 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
                                 round(hand_distance,1) if hand_distance is not None else None,
                                 position({'x':x*POSITION_SCALE,'z':z*POSITION_SCALE}) if detailed and obj_kind in POSITION_KINDS else None,
                                 species,traits or None,person or None,metadata or None,obj,
-                                owner_god_id=owner_id,owner_link=owner_link,engine_class=engine_class)
+                                owner_god_id=owner_id,owner_link=owner_link,engine_class=engine_class,
+                                object_type=subtype)
                             known_objects.append(item)
                             if distance<=SUMMARY_RADIUS:objects.append(item)
                             if hand_distance is not None and hand_distance<=SUMMARY_RADIUS:hand_objects.append(item)
@@ -231,6 +236,12 @@ def read_surroundings(reader: TrainingReader, observer=None) -> SurroundingsSamp
         portals, portal_errors = read_portals(reader, session, creature, player,
             (cx * POSITION_SCALE, cz * POSITION_SCALE),
             (hx, hz) if hand_checks else None, kind)
+        # A portal may also be in beliefs after an interaction. Use the richer
+        # current portal-list reading once, including its connections/deposits.
+        portal_ids = {o.object_id for o in portals}
+        known_objects = [o for o in known_objects if o.object_id not in portal_ids]
+        objects = [o for o in objects if o.object_id not in portal_ids]
+        hand_objects = [o for o in hand_objects if o.object_id not in portal_ids]
         known_objects = select_objects(portals + known_objects)
         objects = select_objects([o for o in portals if o.distance_engine_units <= SUMMARY_RADIUS] + objects,
                                  'distance_engine_units')

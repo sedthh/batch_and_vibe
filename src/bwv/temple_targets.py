@@ -5,7 +5,7 @@ PLAYER_TEMPLE_ID = 'player_temple'
 HOME_GUIDANCE = '''## Your god's temple
 
 Your home is the creature pen at your player god's temple. The temple's stable target ID is
-"player_temple". Use move_to(destination={"special":"player_temple"}, pace="auto")
+"player_temple". Use move_to(target="player_temple", pace="auto")
 to head toward your home temple without searching nearby objects first. This
 targets the temple; it does not select a separate pen location or prove that you
 entered the pen. Other

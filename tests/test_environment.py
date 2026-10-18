@@ -3,7 +3,7 @@ import struct
 import unittest
 from unittest.mock import patch
 
-from bwv.environment import Environment, visual_day_period
+from bwv.environment import Environment, visual_day_period, weather_context
 from bwv import environment_live as live
 from bwv.llm_context import summarize_context
 from bwv.prompt import preview_prompt
@@ -35,7 +35,28 @@ class EnvironmentTests(unittest.TestCase):
             self.assertEqual(data, (expected,rain,snow,'current_creature_cell'))
             env = Environment(weather_near_creature=data[0])
             compact = summarize_context(json.loads(preview_prompt(playable(environment=env),None).context_json))
-            self.assertEqual(compact['world'], {'weather_near_creature':expected})
+            self.assertEqual(compact['world'], {'weather_near_creature':{
+                'raining':rain > 0, 'snowing':snow > 0}})
+
+    def test_ground_snow_is_independent_of_falling_snow_and_preserves_false(self):
+        for falling, ground in (('no_rain_or_snow',True), ('snow',False), (None,True),
+                                (None,False), ('rain',None)):
+            env=Environment(weather_near_creature=falling,snow_on_ground=ground)
+            prompt=json.loads(preview_prompt(playable(environment=env),None).context_json)
+            compact=summarize_context(prompt)['world']['weather_near_creature']
+            if falling is None:
+                self.assertEqual(compact,{'snow_on_ground':ground})
+            else:
+                self.assertEqual(compact['snowing'],falling=='snow')
+                self.assertEqual(compact['raining'],falling=='rain')
+                if ground is None:self.assertNotIn('snow_on_ground',compact)
+                else:self.assertIs(compact['snow_on_ground'],ground)
+            self.assertTrue(all(type(value) is bool for value in compact.values()))
+
+    def test_weather_projection_only_exposes_known_booleans(self):
+        self.assertEqual(weather_context({'raining':False,'snowing':None,'snow_on_ground':0,
+                                           'coverage':100}),{'raining':False})
+        self.assertEqual(weather_context(None),{})
 
     def test_stale_missing_or_changing_weather_is_not_reported_as_dry(self):
         for variant in ('stale','missing','moving','changed','layout','outside'):

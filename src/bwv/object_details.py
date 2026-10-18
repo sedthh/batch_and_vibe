@@ -35,7 +35,7 @@ def public_object(obj):
     from .nearby_people import person_details
     from .animal_types import ANIMAL_TYPES
     from .creature_live import SPECIES
-    from .held_objects import RUNTIME_HELD_DETAILS
+    from .object_types import OBJECT_SUBTYPES
     result = {k:deepcopy(obj[k]) for k in ('object_id','kind','distance_engine_units',
         'distance_to_god_hand_engine_units','town_id','on_fire','miracle','object_type') if obj.get(k) is not None}
     if obj.get('kind')=='object':
@@ -65,7 +65,7 @@ def public_object(obj):
     # A canonical description, not an invented personal name or the search alias.
     kind=result.get('kind','object')
     name=kind.replace('_',' ')
-    if result.get('object_type') in RUNTIME_HELD_DETAILS.values():name=result['object_type'].replace('_',' ')
+    if result.get('object_type') in OBJECT_SUBTYPES:name=result['object_type'].replace('_',' ')
     if result.get('species'):name=result['species'].replace('_',' ')
     if kind=='miracle_bubble' and isinstance(result.get('miracle'),str):
         name=result['miracle'].replace('_',' ')+' miracle bubble'

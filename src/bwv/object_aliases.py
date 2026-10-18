@@ -21,7 +21,10 @@ _GROUPS = (
     (('rock',), ('stone', 'boulder')),
     (('animal',), ('wildlife', 'livestock', 'beast')),
     (('mushroom',), ('fungus', 'fungi', 'toadstool')),
-    (('toy',), ('ball', 'football', 'beach_ball', 'plaything', 'teddy_bear')),
+    (('toy',), ('ball', 'toy_ball', 'football', 'soccer_ball', 'beach_ball', 'beachball',
+                'rubber_ball', 'plaything', 'cuddly_toy', 'teddy', 'teddy_bear',
+                'soft_toy', 'stuffed_toy', 'stuffed_animal', 'plush_toy', 'plushie',
+                'die', 'dice', 'toy_die', 'toy_dice')),
     (('miracle_bubble',), ('bubble', 'miracle_ball', 'miracle_sphere', 'spell_bubble')),
     (('miracle_dispenser',), ('spell_dispenser', 'miracle_stand', 'spell_stand', 'pedestal', 'miracle_pedestal')),
     (('food_pile',), ('food', 'grain', 'grain_pile', 'food_heap', 'grain_heap')),
@@ -102,7 +105,7 @@ def target_matches(requested, target):
 OBJECT_ALIAS_CONTRACT = """Object search accepts familiar names, spaces, hyphens and plurals:
 vortex = portal/island portal/whirlpool; teleport = teleporter/teleport miracle.
 These are different objects: vortexes link islands one way; teleports link places
-on the same island two ways. Use find_objects or inspect_surrounding to describe
+on the same island two ways. Use find_objects to describe
 them, even without an action offer. Only action_targets supplies native action offers.
 totem = town centre/town center; storage = warehouse/storehouse; house = dwelling/hut;
 workshop = scaffold/scaffolding maker, creator or workshop (the building that makes scaffolding);
@@ -113,7 +116,12 @@ miracle bubble = bubble/miracle ball/miracle sphere/spell bubble;
 miracle dispenser = miracle stand/spell stand/spell dispenser/pedestal/miracle pedestal.
 food pile = food/grain/food heap; wood pile = wood/timber/lumber; fishing area = fishing spot/fish;
 tree = bush/shrub/sapling; rock = stone/boulder; mushroom = fungus/fungi/toadstool;
-toy = ball/football/beach ball/plaything/teddy bear; animal = wildlife/livestock/beast.
+toy = ball/toy ball/football/soccer ball/beach ball/beachball/rubber ball/plaything,
+cuddly toy/teddy/teddy bear/soft toy/stuffed toy/stuffed animal/plush toy/plushie,
+or die/dice/toy die/toy dice; animal = wildlife/livestock/beast.
+Toy aliases search the toy category. Results identify the actual subtype when
+available (such as die, ball or cuddly toy); a generic toy reading alone does not
+identify its shape. Never infer the subtype from the search word.
 Species filters include cattle/cows, sheep, wolves, horses and the observed species names.
 food_source/place to eat searches stores, fields, trees and food piles; action=eat
 then limits results to offered feeding routines. Actors/important people, corpses/

@@ -3,6 +3,7 @@
 #pragma once
 #include "action_probe_policy.h"
 #include "command_priority.h"
+#include "thinking_pause.h"
 #include "activity_guard.h"
 #include "movement_guard.h"
 #include "position_movement.h"
@@ -14,7 +15,12 @@
 #include "miracle_actions.h"
 #include "throw_targets.h"
 #include "world_actions.h"
+#include "fishing_delivery.h"
+#include "teleport_travel.h"
 #include "individual_gesture.h"
+#ifdef BWV_HELD_ACTIONS
+#include "mushroom_effect.h"
+#endif
 #include "pickup_completion.h"
 #include "pickup_eligibility.h"
 #include "catalog_refresh.h"
@@ -54,6 +60,7 @@ ObjectTarget object_target;
 ObjectPoint executed_object;
 ObjectArrival object_arrival;
 HeldTarget held_target;
+HeldExaminationVariation held_examination_variation{static_cast<uint32_t>(GetTickCount64())};
 HeldMiracle held_miracle;
 ThrowTargets throw_targets;
 // Same identity lease mechanism; binding 1 means an empty hand. Becoming
@@ -71,6 +78,15 @@ uint64_t lookup_epoch=0,lookup_until=0;
 int32_t requested_body_animation=-1;
 bool body_animation_observed=false;
 uint32_t body_animation_duration=0;
+FishingTrace fishing_trace;
+#ifdef BWV_HELD_ACTIONS
+MushroomConsumption mushroom_consumption;
+CommandPriority mushroom_priority;
+bool cut_content_enabled=false; // configured by the launcher, not a model tool
+uint64_t mushroom_sample_at=0;
+uint32_t mushroom_effect_calls=0,mushroom_eye_mode=UINT32_MAX;
+bool mushroom_reading_valid=false,mushroom_sequence_active=false;
+#endif
 ThrowPoint executed_pickup;
 bool pickup_observed=false;
 PickupCompletion pickup_completion;
@@ -115,6 +131,12 @@ const char* outcome = "not_executed";
 std::atomic<bool> self_catalog_verified{false};
 uint32_t action_timeout_ms=10000;
 CommandPriority command_priority;
+ThinkingPause thinking_pause;
+AgendaPriorityReading thinking_agenda, latest_agenda;
+ThinkingLeash latest_thinking_leash;
+bool thinking_hook_installed=false;
+std::atomic<uintptr_t> thinking_owner{0};
+thread_local bool inside_probe_tick=false;
 bool observation_active=false;
 bwv_observer::WorkTiming inspection_work,catalog_work;
 bwv_observer::WorkTiming target_pool_work,pickup_check_work,recipe_work,legacy_target_work;
@@ -238,16 +260,110 @@ void clear_command_priority(uintptr_t mental) {
         std::memcpy(reinterpret_cast<void*>(mental+0x1C14),&cleared,sizeof(cleared));
 }
 
+ThinkingLeash inspect_thinking_leash(uintptr_t interface_status) {
+    ThinkingLeash result;
+    const auto leash=word(interface_status+0x12C);
+    if(type(interface_status,".?AVGInterfaceStatus@@") && type(leash,".?AVGLeashStatus@@")
+            && read(leash+0x14,result.active) && result.active<=1
+            && read(leash+0x1C,result.variant) && read(leash+0x24,result.target))result.valid=true;
+    return result;
+}
+
+bool thinking_control_allowed(uintptr_t creature,ThinkingLeash& leash) {
+    // A small control read at the decision boundary, not another world scan.
+    // Direct hand/leash commands use their own native path and stay runnable.
+    const auto game=word(0xD0195C),player=word(creature+0x1070);
+    uint8_t game_flags=0,player_index=255,hand_index=255;
+    uint16_t flags=0;
+    float health=0;
+    if(!read(creature+0x24,flags) || (flags&0x400) || word(creature+0x10C0)
+            || !read(creature+0x48,health) || !(health>0 && health<=1)
+            || !read(game+0x14,game_flags) || (game_flags&4)
+            || !read(game+0x205A59,player_index) || player_index>=8
+            || player!=game+0x18+player_index*0xA60 || word(player+0xA4C)!=creature
+            || !read(game+0x205A5A,hand_index) || hand_index>=2)return false;
+    const auto script=word(game+0x250090),interface=word(player+0x14+hand_index*4);
+    const auto hand=word(interface+0x3A0),body=word(word(creature+0x160)+0x58);
+    leash=inspect_thinking_leash(word(interface+0x39C));
+    return script && word(script+0x78)==1 && word(script+0x80)==1 && word(script+0xA8)==0
+        && hand && word(hand+0x4878)==1 && word(interface+0x3AC)!=19
+        && body && word(body+0x528C)==0;
+}
+
+void update_thinking_pause(uint64_t epoch,uint64_t now,uintptr_t creature,uintptr_t mental,bool allowed,
+                           ThinkingLeash leash) {
+    if(!thinking_pause.open)return;
+    if(epoch!=thinking_pause.epoch || creature!=thinking_pause.creature || mental!=thinking_pause.mental) {
+        thinking_pause.release("identity_changed");thinking_owner=0;return;
+    }
+    auto current=inspect_command_priority(creature);
+    bool same=current.valid;
+    for(unsigned i=0;i<5 && same;++i)same=current.agenda[i]==thinking_agenda.agenda[i];
+    const bool changed=current.valid && current.forced && (!same || !thinking_agenda.forced);
+    thinking_pause.suppress(epoch,now,creature,mental,allowed && current.valid,leash,changed);
+    if(!thinking_pause.open)thinking_owner=0;
+}
+
+uint32_t __fastcall thinking_decide(void* object,void*) {
+    const auto creature=reinterpret_cast<uintptr_t>(object);
+    bool paused=false;
+    if(thinking_owner.load()==creature && !inside_probe_tick) {
+        AcquireSRWLockExclusive(&lock);
+        if(thinking_pause.open && thinking_pause.creature==creature) {
+            ThinkingLeash leash;
+            const bool allowed=observation_active && thinking_control_allowed(creature,leash);
+            update_thinking_pause(policy.epoch,GetTickCount64(),creature,word(creature+0x164),
+                                  allowed,leash);
+            paused=thinking_pause.active;
+            if(paused)++thinking_pause.skipped;
+        }
+        ReleaseSRWLockExclusive(&lock);
+    }
+    // DecideWhatToDo returns 1 on every normal exit. Only its incremental
+    // autonomous planning is skipped; ProcessSubAction and direct commands
+    // continue through their original paths, including animation cleanup.
+    if(paused)return 1;
+    using Decide=uint32_t(__thiscall*)(void*);
+    return reinterpret_cast<Decide>(0x4F0560)(object);
+}
+
+bool install_thinking_hook() {
+    // One verified virtual slot in this loaded image; no executable file edits,
+    // inline instructions, copied vtables, or per-frame patching.
+    constexpr uintptr_t slot=0x8CC810+0x8C8;
+    if(!type_table(0x8CC810,".?AVCreature@@") || word(slot)!=0x4F0560)return false;
+    DWORD protection=0,ignored=0;
+    if(!VirtualProtect(reinterpret_cast<void*>(slot),sizeof(void*),PAGE_READWRITE,&protection))return false;
+    auto* address=reinterpret_cast<PVOID volatile*>(slot);
+    const auto previous=InterlockedCompareExchangePointer(address,reinterpret_cast<void*>(&thinking_decide),
+                                                          reinterpret_cast<void*>(0x4F0560));
+    const bool restored=VirtualProtect(reinterpret_cast<void*>(slot),sizeof(void*),protection,&ignored)!=FALSE;
+    if(!restored && previous==reinterpret_cast<void*>(0x4F0560))
+        InterlockedCompareExchangePointer(address,reinterpret_cast<void*>(0x4F0560),reinterpret_cast<void*>(&thinking_decide));
+    return restored && previous==reinterpret_cast<void*>(0x4F0560);
+}
+
+void end_thinking_for_lifecycle() {
+    AcquireSRWLockExclusive(&lock);
+    thinking_pause.release("session_changed");thinking_owner=0;
+    latest_agenda={}; // reject late begin packets until the new session is sampled
+    latest_thinking_leash={};
+    ReleaseSRWLockExclusive(&lock);
+}
+
 struct Observation {
     uintptr_t creature = 0, mental = 0;
     uintptr_t held = 0, held_table = 0;
     uint32_t held_kind = 0;
     bool held_can_eat = false;
+    bool held_can_bring_home = false;
+    const char* held_home_blocker = "home_not_checked";
     uint32_t tick = 0, plan = 0;
     uint32_t desire = UINT32_MAX;
     uint32_t hand_mode = UINT32_MAX;
     Activity activity;
     Movement movement;
+    ThinkingLeash leash;
     bool scripted = false;
     bool plan_verified = false;
     uint32_t actions = 0;
@@ -383,6 +499,42 @@ Observation inspect() {
     read(obs.mental+0xF50,obs.desire);
     const uintptr_t physical=word(obs.creature+0x160);
     if (!type(physical,".?AVCreaturePhysical@@")) return obs;
+#ifdef BWV_HELD_ACTIONS
+    // Observe the physical hand independently of command permission. A hand
+    // mode or scene lock must not masquerade as releasing/replacing the item.
+    // The control checks below still block every action during those states.
+    uint32_t held=0;
+    if (!read(physical+0x28,held)) return obs;
+    if (held) {
+        obs.held=held;obs.held_table=word(held);
+        if (!range(held,4) || !range(obs.held_table,4)) return obs;
+        const auto semantic_kind=object_kind(held,type,word);
+        obs.held_kind=semantic_kind==26?10:semantic_kind==7?8:type(held,".?AVPileFood@@")?1:type(held,".?AVTree@@")?2:type(held,".?AVRock@@")?3:
+            (type(held,".?AVVillager@@") || type(held,".?AVSpecialVillager@@"))?5:
+            animal_object(held,type)?6:
+            (type(held,".?AVOneOffSpellSeed@@") || type(held,".?AVSpellSeed@@"))?7:
+            (type(held,".?AVBall@@") || type(held,".?AVFootball@@"))?8:type(held,".?AVPileWood@@")?9:4;
+        // GameThingWithPos::CanBeEatenByCreature is virtual slot 0x22C.
+        // Query on the game thread, for this object and this creature. This
+        // includes edible objects without requiring our classifier to name them.
+        const auto edible_query=word(obs.held_table+0x22C);
+        if(edible_query>=0x400000 && edible_query<0x8A0000 && range(edible_query,1)) {
+            using CanEat=int(__thiscall*)(void*,void*);
+            obs.held_can_eat=reinterpret_cast<CanEat>(edible_query)(
+                reinterpret_cast<void*>(held),reinterpret_cast<void*>(obs.creature))!=0;
+        }
+        const auto& home=held_home_recipe(obs.held_kind,obs.held_can_eat);
+        const auto metadata=0xC6C490+home.plan*0x110;
+        const auto length=std::strlen(home.runtime_name)+1;
+        const bool home_recipe_verified=type(metadata,".?AVCreatureActionInfo@@") && range(metadata+0x24,length)
+            && !std::memcmp(reinterpret_cast<void*>(metadata+0x24),home.runtime_name,length)
+            && word(0x9D1698+home.plan*80)==home.constructor;
+        obs.held_home_blocker=home_recipe_verified
+            ?held_home_blocker(obs.creature,game,[](uintptr_t p,auto& value){return read(p,value);})
+            :"native_home_recipe_unverified";
+        obs.held_can_bring_home=!obs.held_home_blocker;
+    }
+#endif
     obs.activity=inspect_activity(obs.creature,obs.mental,physical);
     uint16_t flags=0; uint32_t dev_script=0;
     if (!read(obs.creature+0x24,flags) || !read(obs.creature+0x10C0,dev_script)) return obs;
@@ -416,38 +568,16 @@ Observation inspect() {
     if (hand_state==19) { obs.blocked="training_attention"; return obs; }
     const uintptr_t interface_status=word(interface+0x39C);
     obs.movement=inspect_movement(game,player,obs.creature,interface_status);
-    const uintptr_t leash=word(interface_status+0x12C);
-    uint32_t leash_active=0;
-    if (!type(interface_status,".?AVGInterfaceStatus@@") || !type(leash,".?AVGLeashStatus@@")
-            || !read(leash+0x14,leash_active)) return obs;
+    obs.leash=inspect_thinking_leash(interface_status);
+    if(!obs.leash.valid)return obs;
     // A leash influences native behavior; it does not exclusively own the
     // creature. Keep it attached while allowing explicit agenda commands,
     // including waking. Script, menu and training controls remain checked.
+#ifndef BWV_HELD_ACTIONS
     uint32_t held=0;
-    if (!type(physical,".?AVCreaturePhysical@@") || !read(physical+0x28,held)) return obs;
-    if (held) {
-#ifdef BWV_HELD_ACTIONS
-        obs.held=held;obs.held_table=word(held);
-        if (!range(held,4) || !range(obs.held_table,4)) return obs;
-        const auto semantic_kind=object_kind(held,type,word);
-        obs.held_kind=semantic_kind==26?10:semantic_kind==7?8:type(held,".?AVPileFood@@")?1:type(held,".?AVTree@@")?2:type(held,".?AVRock@@")?3:
-            (type(held,".?AVVillager@@") || type(held,".?AVSpecialVillager@@"))?5:
-            animal_object(held,type)?6:
-            (type(held,".?AVOneOffSpellSeed@@") || type(held,".?AVSpellSeed@@"))?7:
-            (type(held,".?AVBall@@") || type(held,".?AVFootball@@"))?8:type(held,".?AVPileWood@@")?9:4;
-        // GameThingWithPos::CanBeEatenByCreature is virtual slot 0x22C.
-        // Query on the game thread, for this object and this creature. This
-        // includes edible objects without requiring our classifier to name them.
-        const auto edible_query=word(obs.held_table+0x22C);
-        if(edible_query>=0x400000 && edible_query<0x8A0000 && range(edible_query,1)) {
-            using CanEat=int(__thiscall*)(void*,void*);
-            obs.held_can_eat=reinterpret_cast<CanEat>(edible_query)(
-                reinterpret_cast<void*>(held),reinterpret_cast<void*>(obs.creature))!=0;
-        }
-#else
-        obs.blocked="holding_object"; return obs;
+    if (!read(physical+0x28,held)) return obs;
+    if (held) { obs.blocked="holding_object"; return obs; }
 #endif
-    }
     float health=0, energy=0;
     if (!read(obs.creature+0x48,health) || !read(physical+0x1C,energy)
             || !std::isfinite(health) || !std::isfinite(energy)) return obs;
@@ -547,7 +677,7 @@ Observation inspect() {
     }
     if (obs.held) {
         // Holding grants only held-object commands, never an unrelated gesture.
-        obs.actions=held_catalog_verified?held_action_mask(obs.held_kind,obs.held_can_eat):0;
+        obs.actions=held_catalog_verified?held_action_mask(obs.held_kind,obs.held_can_eat,obs.held_can_bring_home):0;
         if (!obs.actions) { obs.blocked="held_action_unavailable";return obs; }
     }
     // Pickup uses the same agenda cleanup as held commands, independently of
@@ -558,24 +688,120 @@ Observation inspect() {
     return obs;
 }
 
+#ifdef BWV_HELD_ACTIONS
+bool has_mushroom_sequence(uintptr_t mental) {
+    const auto sequence=mental+0xFA8;
+    return type(sequence,".?AVCreatureSubActionAgenda@@")
+        && type(sequence+0x28,".?AVCreatureSubAction@@")
+        && type(sequence+0x88,".?AVCreatureSubAction@@")
+        && mushroom_effect_sequence(word(mental+0xF60),word(sequence+0x14),
+                                    word(sequence+0x30),word(sequence+0x90));
+}
+
+bool update_mushroom_effect(uint64_t epoch,uint64_t now,const Observation& obs,const char* blocked) {
+    // A handful of scalar reads, at most four times per second. No world scan,
+    // recording, growing history, provider call or external polling is needed.
+    if(now<mushroom_sample_at && !has_pending)return false;
+    mushroom_sample_at=now+250;
+    if(!cut_content_enabled) {
+        mushroom_priority.release(epoch,inspect_command_priority(obs.creature),"disabled",clear_command_priority);
+        mushroom_consumption.reset();mushroom_consumption.status="disabled";
+        mushroom_reading_valid=false;mushroom_sequence_active=false;
+        return false;
+    }
+    uint32_t counter=0,callback=0;
+    const auto body=word(word(obs.creature+0x160)+0x58);
+    mushroom_eye_mode=UINT32_MAX;
+    mushroom_reading_valid=type(obs.creature,".?AVCreature@@")
+        && type(obs.mental,".?AVCreatureMental@@") && type(body,".?AVLH3DCreature@@")
+        && read(obs.creature+0x184,counter) && read(obs.mental+0x21D0,callback)
+        && read(body+0x5460,mushroom_eye_mode);
+    auto reading=inspect_command_priority(obs.creature);
+    // Identity/load boundaries establish a baseline, never a consumption event.
+    const bool baseline=!mushroom_reading_valid || !mushroom_consumption.initialized
+        || epoch!=mushroom_consumption.epoch || obs.creature!=mushroom_consumption.creature
+        || obs.mental!=mushroom_consumption.mental || obs.tick<mushroom_consumption.tick
+        || counter<mushroom_consumption.counter;
+    if(baseline) {
+        if(!mushroom_reading_valid)
+            mushroom_priority.release(epoch,reading,"reading_unavailable",clear_command_priority);
+        mushroom_priority.active=false;mushroom_priority.status="baseline";
+    }
+    else mushroom_priority.update(epoch,now,reading,obs.blocked!=nullptr,clear_command_priority);
+    mushroom_consumption.observe(epoch,obs.creature,obs.mental,obs.tick,counter,now,mushroom_reading_valid);
+    mushroom_sequence_active=mushroom_reading_valid && reading.valid && reading.active
+        && has_mushroom_sequence(obs.mental);
+    if(has_pending)return false; // the accepted command below decides replacement
+    const bool eating=obs.activity.animation==96 && obs.activity.controller_mode>=2;
+    const auto decision=mushroom_consumption.next(now,mushroom_sequence_active,!blocked,
+                                                obs.held!=0,eating,callback);
+    if(decision==MushroomEffectDecision::none || blocked)return false;
+    const uintptr_t info=0xC6C490+181*0x110;
+    const bool contract=type(info,".?AVCreatureActionInfo@@") && range(info+0x24,8)
+        && !std::memcmp(reinterpret_cast<void*>(info+0x24),"GetHigh",8)
+        && word(0x9D1698+181*80)==0x4B07D0 && word(mushroom_effect_callback)==0x5324EC83
+        && range(obs.mental+0x1C14,4) && range(obs.mental+0x21D0,16);
+    if(!contract) { mushroom_consumption.status="effect_contract_unverified";return false; }
+    if(decision==MushroomEffectDecision::invoke) {
+        movement_pace.release(epoch,obs.creature,read_pace,set_pace);
+        command_priority.release(epoch,reading,"mushroom_consumed",clear_command_priority);
+        mushroom_priority.release(epoch,reading,"new_consumption",clear_command_priority);
+        dispatch_mushroom_effect(callback,[&]() {
+            const uint32_t empty_callback[4]={0,0,0,UINT32_MAX};
+            std::memcpy(reinterpret_cast<void*>(obs.mental+0x21D0),empty_callback,sizeof(empty_callback));
+        },[&]() {
+            // Fixed native post-consumption callback (thiscall, ret 8); the
+            // native function builds its own sequence. Never edit needs/stats.
+            using Effect=void(__thiscall*)(void*,uintptr_t,uintptr_t);
+            ++mushroom_effect_calls;
+            reinterpret_cast<Effect>(mushroom_effect_callback)(reinterpret_cast<void*>(obs.creature),0,0);
+        });
+        reading=inspect_command_priority(obs.creature);
+        mushroom_sequence_active=reading.valid && reading.active && has_mushroom_sequence(obs.mental);
+    }
+    if(mushroom_sequence_active && !mushroom_priority.active) {
+        *reinterpret_cast<uint32_t*>(obs.mental+0x1C14)=1;
+        mushroom_priority.begin(epoch,now,inspect_command_priority(obs.creature));
+        mushroom_priority.window_ms=mushroom_effect_window_ms;
+        mushroom_priority.deadline=now+mushroom_effect_window_ms;
+        mushroom_consumption.status=decision==MushroomEffectDecision::invoke
+            ?"effect_started":"native_effect_observed";
+    } else if(!mushroom_sequence_active) mushroom_consumption.status="effect_not_observed";
+    return decision==MushroomEffectDecision::invoke;
+}
+#endif
+
 void tick(uint64_t epoch,bool observing) {
+    struct ProbeScope {
+        bool previous=inside_probe_tick;
+        ProbeScope(){inside_probe_tick=true;}
+        ~ProbeScope(){inside_probe_tick=previous;}
+    } scope;
     if (!supported || !transport_ready) return;
     if (!game_thread) game_thread=GetCurrentThreadId();
     if (game_thread!=GetCurrentThreadId()) return;
     if(!observing && !observation_active)return;
     ScopedTypeNames cached_class_metadata;
     const uint64_t now=GetTickCount64();
-    const Observation obs=[&](){bwv_observer::TimedWork measured(inspection_work);return inspect();}();
+    Observation obs=[&](){bwv_observer::TimedWork measured(inspection_work);return inspect();}();
     if(!observing) {
         if(!TryAcquireSRWLockExclusive(&lock))return;
         // Release only our still-owned temporary controls. An already-started
         // native action may finish normally; no replacement agenda is sent.
         command_priority.release(epoch,inspect_command_priority(obs.creature),
                                  "observer_disconnected",clear_command_priority);
+        thinking_pause.release("observer_disconnected");
+        thinking_owner=0;
+#ifdef BWV_HELD_ACTIONS
+        mushroom_priority.release(epoch,inspect_command_priority(obs.creature),
+                                  "observer_disconnected",clear_command_priority);
+        mushroom_consumption.reset();mushroom_sample_at=0;
+        mushroom_reading_valid=false;mushroom_sequence_active=false;
+#endif
         movement_pace.release(epoch,obs.creature,read_pace,set_pace);
         policy.observe(epoch,obs.creature,false,"observer_disconnected",now);
         if(has_pending) {
-            has_pending=false;policy.phase=Phase::rejected;++policy.generation;policy.revoke_bound();
+            has_pending=false;policy.phase=Phase::rejected;++policy.generation;
             outcome="observer_disconnected";result_phase="rejected";
         }
         catalog_refresh.initialized=false;
@@ -597,6 +823,15 @@ void tick(uint64_t epoch,bool observing) {
     else if (!stable_since) stable_since=now;
     if (!blocked && !(obs.actions&((1u<<11)|(1u<<15))) && now-stable_since<500) blocked="settling";
     if (!TryAcquireSRWLockExclusive(&lock)) return;
+    latest_agenda=inspect_command_priority(obs.creature);
+    latest_thinking_leash=obs.leash;
+    update_thinking_pause(epoch,now,obs.creature,obs.mental,obs.blocked==nullptr,obs.leash);
+#ifdef BWV_HELD_ACTIONS
+    if(update_mushroom_effect(epoch,now,obs,blocked)) {
+        obs=inspect();blocked=obs.blocked;
+        catalog_refresh.initialized=false;
+    }
+#endif
     command_priority.update(epoch,now,inspect_command_priority(obs.creature),
                             obs.blocked!=nullptr,clear_command_priority);
     PaceReading pace_reading;
@@ -611,7 +846,8 @@ void tick(uint64_t epoch,bool observing) {
     movement_target.observe(obs.movement);
     policy.target_generation=movement_target.token();
 #ifdef BWV_HELD_ACTIONS
-    held_target.observe(epoch,obs.creature,obs.held,obs.held_table,obs.held_kind,obs.held_can_eat);
+    held_target.observe(epoch,obs.creature,obs.held,obs.held_table,obs.held_kind,obs.held_can_eat,
+        obs.held_can_bring_home,obs.held_home_blocker);
     held_miracle=inspect_held_miracle(obs.held,type,word,
         [](uintptr_t p,uint32_t& v){return read(p,v);});
     policy.held_target_generation=held_target.token();
@@ -683,15 +919,25 @@ void tick(uint64_t epoch,bool observing) {
     for(size_t i=0;i<ThrowTargets::capacity;++i)
         policy.water_tokens[i]=pickup_targets.entries[i].point.kind==1?pickup_targets.entries[i].token:0;
     WorldEntry world_entries[WorldOffers::capacity]{};size_t world_count=0;
+    TeleportNetwork teleport_network;
+    const bool teleport_verified=obs.movement.verified
+        && word(0x92C12C)==0x5FC430
+        && read_teleport_network(word(obs.creature+0x1070),obs.movement.width,obs.movement.depth,
+            [](uintptr_t p,auto& v){return read(p,v);},type,teleport_network);
     supported_world_recipes="[";
     held_cast_offered=false;
     { // Planning targets remain visible while a put-down prerequisite runs.
         for(uint32_t i=0;i<world_recipe_count;++i) {
             const auto& r=world_recipes[i];
+            if(!cut_content_enabled && recovered_body_gesture(r.body_animation))continue;
             const MiracleRecipe check{19,r.plan,r.spell,r.name,r.label,r.constructor};
             if(!miracle_contract(check) || (r.spell && (word(0x9D16A8+r.plan*80)!=r.spell
                     || !world_miracle_allowed(obs.mental,check))))continue;
             if(r.held_category && (!held_miracle.verified || !(held_miracle.categories&r.held_category)))continue;
+            if(r.plan==259 && !held_home_available(obs.creature,word(0xD0195C),
+                    [](uintptr_t p,auto& v){return read(p,v);}))continue;
+            if(r.fish_to_hand && (!position_contract() || !valid_destination(
+                    {float(obs.movement.hand_x),float(obs.movement.hand_z)},obs.movement)))continue;
             if(supported_world_recipes.size()>1)supported_world_recipes+=",";
             supported_world_recipes+="\""+std::string(r.name)+"\"";
             const auto first=world_count;
@@ -701,6 +947,22 @@ void tick(uint64_t epoch,bool observing) {
             const auto target_count=known.select(r.kinds,targets);
             for(size_t j=0;j<target_count && world_count<WorldOffers::capacity;++j)
                 if(world_target_supported(r,targets[j],type))world_entries[world_count++]={0,i,targets[j],false};
+            if(teleport_verified && (r.plan==134 || r.plan==122)) {
+                for(size_t j=0;j<teleport_network.count && world_count<WorldOffers::capacity;++j) {
+                    const auto& gate=teleport_network.gates[j];TeleportRoute route;
+                    if(r.plan==134 && !teleport_network.route(gate.object,
+                            obs.movement.creature_x,obs.movement.creature_z,route))continue;
+                    const double x=gate.x*(10./65536.),z=gate.z*(10./65536.);
+                    ThrowPoint point{gate.object,0,gate.table,30,
+                        std::hypot(x-obs.movement.creature_x,z-obs.movement.creature_z),false,-1,
+                        std::hypot(x-obs.movement.hand_x,z-obs.movement.hand_z),x,z,-1,nullptr,0,true};
+                    // No artificial beliefs during sampling. Dispatch obtains
+                    // a real entrance belief only when travel is requested.
+                    if(point.distance>0 && point.distance<=known_target_distance)
+                        world_entries[world_count++]={0,i,point,false};
+                    if(gate.object==focus)lookup_observed_object=focus;
+                }
+            }
             if(r.held_category)for(size_t j=first;j<world_count;++j) {
                 auto& e=world_entries[j];e.held_generation=held_target.token();
                 e.held_spell=held_miracle.spell;e.held_seed=held_miracle.seed;e.held_power=held_miracle.power;
@@ -781,6 +1043,10 @@ void tick(uint64_t epoch,bool observing) {
     if (!monitoring_finished && policy.consumed && agenda_dispatched && (epoch!=executed_epoch || obs.creature!=executed_creature || obs.mental!=executed_mental)) {
         outcome="session_or_creature_changed"; policy.finish(now,false);
     } else if (!monitoring_finished && policy.consumed && agenda_dispatched) {
+        if((requested_plan==259 || requested_plan==29 || requested_plan==300)
+                && obs.plan==requested_plan && obs.activity.verified)
+            fishing_trace.observe(static_cast<uint32_t>(now-request_at),word(obs.mental+0xFB4),
+                obs.activity.current_subaction,obs.held!=0);
         if (obs.plan_verified && obs.plan==requested_plan) observed_plan=true;
         if (requested_body_animation>=0 && obs.activity.verified
                 && obs.activity.animation==static_cast<uint32_t>(requested_body_animation)
@@ -872,7 +1138,8 @@ void tick(uint64_t epoch,bool observing) {
                     monitoring_finished=true;result_phase="rejected";ReleaseSRWLockExclusive(&lock);return;
                 }
                 const auto& r=world_recipes[entry->recipe];
-                requested_plan=r.plan;requested_action=r.name;action_timeout_ms=60000;
+                requested_plan=r.plan;requested_action=r.name;
+                action_timeout_ms=(r.plan==259 || r.plan==29 || r.plan==300)?180000:60000;
             }
             if(const auto* r=miracle_recipe(pending.action)) {
                 requested_plan=r->plan;requested_action=r->name;action_timeout_ms=60000;
@@ -885,7 +1152,9 @@ void tick(uint64_t epoch,bool observing) {
                 pickup_observed=false;executed_pickup={};pickup_completion.reset();
             }
             if (const auto* recipe=held_recipe(pending.action)) {
+                if(pending.action==22)recipe=&held_home_recipe(obs.held_kind,obs.held_can_eat);
                 requested_plan=recipe->plan;requested_action=recipe->name;action_timeout_ms=45000;
+                if(pending.action==22)action_timeout_ms=180000;
             }
 #endif
             movement_start_x=obs.movement.creature_x; movement_start_z=obs.movement.creature_z;
@@ -929,6 +1198,10 @@ void tick(uint64_t epoch,bool observing) {
             void* secondary_target=nullptr;
             bool move_to_container=false;
             PositionDestination container_destination;
+            TeleportRoute teleport_route;
+            uintptr_t teleport_reaction_object=0;
+            bool fish_to_hand=false;
+            PositionDestination fish_destination;
 #ifdef BWV_HELD_ACTIONS
             if(pending.action==19) {
                 const auto* entry=world_offers.find(pending.reserved);
@@ -949,10 +1222,39 @@ void tick(uint64_t epoch,bool observing) {
                     valid=hand_valid && miracle_contract(check) && (!r.spell || (word(0x9D16A8+r.plan*80)==r.spell && world_miracle_allowed(obs.mental,check)))
                         && word(entry->target.object)==entry->target.table
                         && (entry->self ? r.self && entry->target.object==obs.creature
-                            : world_target_supported(r,entry->target,type) && movement_belief(entry->target.belief)
-                                && word(entry->target.belief+0x30)==entry->target.object)
+                            : world_target_supported(r,entry->target,type)
+                                && (entry->target.kind==30 || (movement_belief(entry->target.belief)
+                                    && word(entry->target.belief+0x30)==entry->target.object)))
                         && (!entry->target.player_temple || is_player_temple(entry->target.object,obs.creature));
                     if(valid && !entry->self)target=reinterpret_cast<void*>(entry->target.belief);
+                    if(valid && r.plan==259)valid=held_home_available(obs.creature,word(0xD0195C),
+                        [](uintptr_t p,auto& v){return read(p,v);});
+                    if(valid && r.fish_to_hand) {
+                        fish_destination={float(obs.movement.hand_x),float(obs.movement.hand_z)};
+                        valid=position_contract() && valid_destination(fish_destination,obs.movement);
+                        fish_to_hand=valid;
+                    }
+                    if(valid && entry->target.kind==30) {
+                        TeleportNetwork current;
+                        valid=obs.movement.verified && read_teleport_network(word(obs.creature+0x1070),
+                            obs.movement.width,obs.movement.depth,[](uintptr_t p,auto& v){return read(p,v);},type,current);
+                        bool present=false;
+                        for(size_t j=0;j<current.count;++j)present|=current.gates[j].object==entry->target.object
+                            && current.gates[j].table==entry->target.table;
+                        valid=valid && present;
+                        if(valid && r.plan==122)target=belief;
+                        if(valid && r.plan==134) {
+                            valid=range(obs.creature+0x11CC,12) && current.route(entry->target.object,
+                                obs.movement.creature_x,obs.movement.creature_z,teleport_route);
+                            if(valid) {
+                                teleport_reaction_object=teleport_reaction(teleport_route.entrance.object,
+                                    [](uintptr_t p,auto& v){return read(p,v);},type);
+                                valid=teleport_reaction_object && word(word(obs.creature)+0x9F0)==0x4F3A60
+                                    && word(word(obs.creature)+0x990)==0x4F2680;
+                                action_timeout_ms=180000;
+                            }
+                        }
+                    }
                     if(valid && !entry->self && r.plan==122 && location_only_target(entry->target,type)) {
                         // Keep the selected identity, but resolve its LIVE position
                         // at dispatch. The stock object approach silently skips
@@ -1078,9 +1380,39 @@ void tick(uint64_t epoch,bool observing) {
             // with player. Sleep remains explicit; no needs or fatigue are edited.
             movement_pace.release(epoch,obs.creature,read_pace,set_pace);
             command_priority.release(epoch,inspect_command_priority(obs.creature),"replaced",clear_command_priority);
+#ifdef BWV_HELD_ACTIONS
+            mushroom_priority.release(epoch,inspect_command_priority(obs.creature),"replaced_by_command",clear_command_priority);
+            if(mushroom_consumption.pending)mushroom_consumption.cancel("replaced_by_command");
+#endif
             PaceReading before_pace;
             const bool pace_ready=read_pace(obs.creature,before_pace);
-            if(pending.player_command()) {
+            if(requested_plan==134 && teleport_route.entrance.object) {
+                // Use the full native reaction setup. It cleans up the old
+                // agenda, creates the entrance belief and registers the creature
+                // with the gate's reaction, which keeps its route alive.
+                using SetupTeleport=void(__thiscall*)(void*,void*,void*);
+                ++belief_calls;
+                reinterpret_cast<SetupTeleport>(0x4F3A60)(creature,
+                    reinterpret_cast<void*>(teleport_route.entrance.object),
+                    reinterpret_cast<void*>(teleport_reaction_object));
+                if(word(obs.creature+0x94)!=teleport_reaction_object || word(obs.mental+0xF60)!=134) {
+                    policy.finish(now,false,Phase::rejected);outcome="teleport_reaction_registration_failed";
+                    monitoring_finished=true;result_phase="rejected";ReleaseSRWLockExclusive(&lock);return;
+                }
+                // Setup uses the old onward goal. Replace it with the requested
+                // EXIT after setup; a second SetAgenda would remove the reaction.
+                // GoToTeleport and MoveByTeleport still perform actual travel.
+                struct MapPoint { int32_t x,z;float altitude; } destination{
+                    teleport_route.destination.x,teleport_route.destination.z,teleport_route.destination.altitude};
+                static_assert(sizeof(MapPoint)==12);
+                std::memcpy(reinterpret_cast<void*>(obs.creature+0x11CC),&destination,sizeof(destination));
+                using RegisterDestination=void(__thiscall*)(void*,void*,const MapPoint*);
+                ++calls;
+                reinterpret_cast<RegisterDestination>(0x5FC6A0)(
+                    reinterpret_cast<void*>(teleport_route.entrance.object),creature,&destination);
+                if(pending.player_command())command_priority.begin(epoch,GetTickCount64(),
+                    inspect_command_priority(obs.creature),pending.night_priority());
+            } else if(pending.player_command()) {
                 // Native forced-agenda wrapper: normal SetAgenda cleanup plus
                 // Mental+0x1C14. AI selection honors it; native leash input can
                 // still replace the agenda. The lease only clears our own flag.
@@ -1089,21 +1421,85 @@ void tick(uint64_t epoch,bool observing) {
                     belief,requested_plan,target,secondary_target);
                 command_priority.begin(epoch,GetTickCount64(),inspect_command_priority(obs.creature),pending.night_priority());
             } else set_agenda(creature,pending.action==2?8:24,belief,requested_plan,target,secondary_target,1,1);
+            // Inspection can play a held-item gesture in an intermediate tool
+            // round. Keep the turn's pause over our own command; the broker
+            // releases it after the final selection or speech-only answer.
+            if(thinking_pause.active)thinking_agenda=inspect_command_priority(obs.creature);
 #ifdef BWV_HELD_ACTIONS
-            if(pending.action==21) {
-                const uintptr_t sequence=obs.mental+0xFA8;
-                const bool configured=type(sequence,".?AVCreatureSubActionAgenda@@")
-                    && word(sequence+0xC28)==obs.creature
-                    && type(sequence+0x28,".?AVCreatureSubAction@@")
-                    && configure_held_discard(word(sequence+0x14),word(sequence+0xC),
-                        word(sequence+0x30),word(sequence+0x38),[&](int32_t animation) {
-                            struct IntegerArgument {uintptr_t table;int32_t value;} argument{0x8CF064,animation};
-                            using SetArgument=void(__thiscall*)(void*,void*,uint32_t);
-                            ++calls;
-                            reinterpret_cast<SetArgument>(0x4FF6F0)(&argument,reinterpret_cast<void*>(sequence),0);
-                        });
+            if(requested_plan==259 || requested_plan==29 || requested_plan==300) {
+                const auto sequence=obs.mental+0xFA8;bool adjusted=false;
+                const bool prepared=prepare_fishing_approach(sequence,obs.creature,
+                    [](uintptr_t p,auto& v){return read(p,v);},type,[&](const FishingPoint& point) {
+                        using GetBody=void*(__thiscall*)(void*);
+                        using Valid=int(__cdecl*)(const FishingPoint*);
+                        calls+=2;reinterpret_cast<GetBody>(0x477850)(creature);
+                        return reinterpret_cast<Valid>(0x483850)(&point)!=0;
+                    },[&](const FishingPoint& from,FishingPoint& to) {
+                        using Repair=void(__cdecl*)(const FishingPoint*,FishingPoint*);
+                        ++calls;reinterpret_cast<Repair>(0x4839D0)(&from,&to);
+                    },[&](uint32_t index,const FishingPoint& point,float radius) {
+                        struct Argument {uintptr_t table;FishingPoint point;float radius;} argument{0x8CEFEC,point,radius};
+                        static_assert(sizeof(Argument)==20);
+                        using SetArgument=void(__thiscall*)(void*,void*,uint32_t);
+                        ++calls;reinterpret_cast<SetArgument>(0x4FF820)(&argument,reinterpret_cast<void*>(sequence),index);
+                        return true;
+                    },adjusted);
+                fishing_trace.approach=prepared?(adjusted?"native_shore_adjustment":"already_reachable"):"unavailable";
+                if(!prepared) {
+                    using Clear=void(__thiscall*)(void*);
+                    ++calls;reinterpret_cast<Clear>(0x4FF5C0)(reinterpret_cast<void*>(sequence));
+                    command_priority.release(epoch,inspect_command_priority(obs.creature),"fishing_setup_failed",clear_command_priority);
+                    policy.finish(now,false,Phase::rejected);outcome="fishing_approach_unavailable";
+                    monitoring_finished=true;result_phase="rejected";ReleaseSRWLockExclusive(&lock);return;
+                }
+                fishing_trace.observe(0,0,8,false);
+            }
+            if(fish_to_hand) {
+                const auto sequence=obs.mental+0xFA8;
+                const bool configured=configure_fish_delivery(sequence,obs.creature,
+                    [](uintptr_t p,auto& v){return read(p,v);},type,[&](uint32_t index,float radius) {
+                        struct MapPoint {int32_t x,z;float altitude;} map{
+                            static_cast<int32_t>(fish_destination.x*(65536./10.)),
+                            static_cast<int32_t>(fish_destination.z*(65536./10.)),0};
+                        using GroundHeight=float(__thiscall*)(void*);
+                        const float y=reinterpret_cast<GroundHeight>(0x803090)(&map);
+                        if(!std::isfinite(y))return false;
+                        struct PointArgument {uintptr_t table;float x,y,z,radius;} argument{
+                            0x8CEFEC,fish_destination.x,y,fish_destination.z,radius};
+                        static_assert(sizeof(PointArgument)==20);
+                        using SetArgument=void(__thiscall*)(void*,void*,uint32_t);
+                        ++calls;
+                        reinterpret_cast<SetArgument>(0x4FF820)(&argument,reinterpret_cast<void*>(sequence),index);
+                        return true;
+                    });
                 if(!configured) {
-                    policy.finish(now,false,Phase::rejected);outcome="discard_sequence_mismatch";
+                    // Do not fall back to a home trip if retargeting failed.
+                    using Clear=void(__thiscall*)(void*);
+                    ++calls;reinterpret_cast<Clear>(0x4FF5C0)(reinterpret_cast<void*>(sequence));
+                    command_priority.release(epoch,inspect_command_priority(obs.creature),"fishing_setup_failed",clear_command_priority);
+                    policy.finish(now,false,Phase::rejected);outcome="fishing_delivery_sequence_unavailable";
+                    monitoring_finished=true;result_phase="rejected";ReleaseSRWLockExclusive(&lock);return;
+                }
+            }
+            if(pending.action==21 || (pending.action>=23 && pending.action<=27)) {
+                const uintptr_t sequence=obs.mental+0xFA8;
+                const auto apply=[&](int32_t animation) {
+                    struct IntegerArgument {uintptr_t table;int32_t value;} argument{0x8CF064,animation};
+                    using SetArgument=void(__thiscall*)(void*,void*,uint32_t);
+                    ++calls;
+                    reinterpret_cast<SetArgument>(0x4FF6F0)(&argument,reinterpret_cast<void*>(sequence),0);
+                };
+                const bool sequence_ok=type(sequence,".?AVCreatureSubActionAgenda@@")
+                    && word(sequence+0xC28)==obs.creature
+                    && type(sequence+0x28,".?AVCreatureSubAction@@");
+                const bool configured=sequence_ok && (pending.action==21
+                    ? configure_held_discard(word(sequence+0x14),word(sequence+0xC),
+                        word(sequence+0x30),word(sequence+0x38),apply)
+                    : held_examination_variation.configure(pending.action,word(sequence+0x14),word(sequence+0xC),
+                        word(sequence+0x30),word(sequence+0x38),apply));
+                if(!configured) {
+                    policy.finish(now,false,Phase::rejected);
+                    outcome=pending.action==21?"discard_sequence_mismatch":"examination_sequence_mismatch";
                     monitoring_finished=true;result_phase="rejected";ReleaseSRWLockExclusive(&lock);return;
                 }
             }
@@ -1164,6 +1560,16 @@ void tick(uint64_t epoch,bool observing) {
 
 std::string json() {
     AcquireSRWLockShared(&lock);
+    std::string fishing_json;
+    if(requested_action && !std::strncmp(requested_action,"fish_",5)) {
+        fishing_json=",\"fishing_delivery\":{\"approach\":\""+std::string(fishing_trace.approach)+"\",\"steps\":[";
+        for(uint32_t i=0;i<fishing_trace.count;++i) {
+            const auto& step=fishing_trace.steps[i];if(i)fishing_json+=",";
+            fishing_json+="{\"elapsed_ms\":"+std::to_string(step.elapsed_ms)+",\"index\":"+std::to_string(step.index)
+                +",\"subaction\":"+std::to_string(step.action)+",\"holding\":"+(step.holding?"true":"false")+"}";
+        }
+        fishing_json+="]}";
+    }
     const char* move_block=movement_block(current_movement);
     std::string candidates="[";
     if (policy.available && !has_pending) {
@@ -1182,6 +1588,7 @@ std::string json() {
         if (policy.held_enabled && held_catalog_verified)
             for (const auto& recipe:held_recipes)
                 if (policy.allowed_actions&(1u<<(recipe.action-1))) append(recipe.name);
+        if(policy.allowed_actions&(1u<<21)) append("bring_home");
         if(policy.allowed_actions&(1u<<14)) append("throw_held_at");
         if(policy.allowed_actions&(1u<<15)) append("pick_up");
         if(policy.allowed_actions&(1u<<19)) append("move_to_position");
@@ -1290,6 +1697,18 @@ std::string json() {
         ",\"body_gesture\":{\"requested_animation\":"+std::to_string(requested_body_animation)+
         ",\"clip_duration_ms\":"+std::to_string(body_animation_duration)+
         ",\"playback_observed\":"+(body_animation_observed?"true":"false")+"}"+
+#ifdef BWV_HELD_ACTIONS
+        ",\"cut_content\":{\"protocol\":13,\"enabled\":"+(cut_content_enabled?"true":"false")+"}"+
+        ",\"mushroom_effect\":{\"enabled\":"+(cut_content_enabled?"true":"false")+",\"pending\":"+(mushroom_consumption.pending?"true":"false")+
+        ",\"reading_valid\":"+(mushroom_reading_valid?"true":"false")+
+        ",\"mushrooms_eaten\":"+(mushroom_reading_valid?std::to_string(mushroom_consumption.counter):"null")+
+        ",\"native_sequence_active\":"+(mushroom_sequence_active?"true":"false")+
+        ",\"eye_mode\":"+(mushroom_reading_valid?std::to_string(mushroom_eye_mode):"null")+
+        ",\"effect_calls\":"+std::to_string(mushroom_effect_calls)+
+        ",\"status\":\""+mushroom_consumption.status+"\",\"priority_active\":"+(mushroom_priority.active?"true":"false")+
+        ",\"priority_remaining_ms\":"+std::to_string(mushroom_priority.remaining(GetTickCount64()))+
+        ",\"priority_status\":\""+mushroom_priority.status+"\"}"+
+#endif
         ",\"held_miracle\":{\"version\":1,\"verified\":"+(held_miracle.verified?"true":"false")+
         ",\"held_generation\":"+std::to_string(held_target.token())+
         ",\"spell\":"+std::to_string(held_miracle.spell)+",\"bubble_spell\":"+std::to_string(held_miracle.bubble_spell)+"}"+
@@ -1297,6 +1716,8 @@ std::string json() {
         ((policy.held_enabled && held_catalog_verified)?"true":"false")+
         ",\"target_generation\":"+std::to_string(held_target.token())+
         ",\"discard_version\":1"+
+        ",\"examine_version\":1,\"held_gesture_version\":1,\"bring_home_version\":1,\"can_bring_home\":"+(held_target.can_bring_home?"true":"false")+
+        ",\"bring_home_unavailable_reason\":"+(held_target.home_blocker?"\""+std::string(held_target.home_blocker)+"\"":"null")+
         ",\"edibility_version\":1,\"can_eat\":"+(held_target.can_eat?"true":"false")+
         ",\"kind\":\""+held_kind_name(held_target.kind)+"\"}"+
         ",\"self_action_catalog\":{\"version\":5,\"verified\":"+
@@ -1319,7 +1740,15 @@ std::string json() {
         ",\"active\":"+(command_priority.active?"true":"false")+
         ",\"remaining_ms\":"+std::to_string(command_priority.remaining(GetTickCount64()))+
         ",\"status\":\""+command_priority.status+"\"}"+
+        ",\"thinking_pause\":{\"version\":2,\"available\":"+(thinking_hook_installed?"true":"false")+
+        ",\"active\":"+(thinking_pause.active?"true":"false")+
+        ",\"control_taken\":"+(thinking_pause.control_taken?"true":"false")+
+        ",\"control_revision\":"+std::to_string(thinking_pause.control_revision)+
+        ",\"token\":"+std::to_string(thinking_pause.token)+
+        ",\"skipped_decisions\":"+std::to_string(thinking_pause.skipped)+
+        ",\"status\":\""+thinking_pause.status+"\"}"+
         ",\"interrupted_actions\":"+interruptions+
+        fishing_json+
         ",\"conditions_allow_action\":"+(policy.available?"true":"false")+
         ",\"compatibility_method\":\""+compatibility_method+"\""+
         ",\"requested_action\":"+(requested_action?"\""+std::string(requested_action)+"\"":"null")+
@@ -1394,6 +1823,33 @@ DWORD WINAPI serve(void*) {
         uint32_t accepted=0;
         AcquireSRWLockExclusive(&lock);
         const auto lookup_now=GetTickCount64();
+        const bool thinking=read_ok && command.magic==0x42575041 && command.version==ThinkingPause::protocol;
+        if(thinking && thinking_hook_installed) {
+            if(command.action==0) {
+                accepted=thinking_pause.end(command.epoch,command.generation,command.reserved)?1:0;
+                if(accepted)thinking_owner=0;
+            } else if(command.epoch==policy.epoch && command.reserved==last_creature
+                    && latest_agenda.valid && latest_agenda.creature==last_creature
+                    && policy.available && !has_pending && observation_active
+                    && command.offered_at<=lookup_now && lookup_now-command.offered_at<=1500) {
+                const bool already_active=thinking_pause.active;
+                accepted=thinking_pause.begin(command.epoch,command.generation,lookup_now,command.action,
+                                               last_creature,last_mental,latest_thinking_leash)?1:0;
+                if(accepted && !already_active) {thinking_agenda=latest_agenda;thinking_owner=last_creature;}
+            }
+        }
+        bool configured=false;
+#ifdef BWV_HELD_ACTIONS
+        configured=read_ok && command.magic==0x42575041 && command.version==13
+            && command.action==0 && command.reserved<=1 && command.epoch==policy.epoch
+            && command.offered_at<=lookup_now && lookup_now-command.offered_at<=1500;
+        if(configured) {
+            cut_content_enabled=command.reserved==1;accepted=1;
+            mushroom_sample_at=0;catalog_refresh.initialized=false;
+            ++policy.generation;
+            for(auto& token:policy.world_tokens)token=0;
+        }
+#endif
         const bool lookup=read_ok && command.magic==0x42575041 && command.version==12
             && command.action==0 && command.reserved && command.epoch==policy.epoch
             && command.generation==policy.generation && command.offered_at<=lookup_now
@@ -1408,7 +1864,7 @@ DWORD WINAPI serve(void*) {
             && (!policy.terminal || !policy.verified_exit) && executed_epoch==policy.epoch
             && executed_creature==last_creature && executed_mental==last_mental;
         const InterruptedAction previous{requested_action,request_at,0};
-        if (read_ok && !lookup && !has_pending
+        if (read_ok && !lookup && !configured && !thinking && !has_pending
                 && (command.pace()==Pace::automatic || (movement_pace_verified
                     && (command.action!=19 || (world_offers.find(command.reserved)
                         && !std::strcmp(world_recipes[world_offers.find(command.reserved)->recipe].name,"move_to")))))
@@ -1419,6 +1875,7 @@ DWORD WINAPI serve(void*) {
             request_at=GetTickCount64();
             replacing_action=displacing?InterruptedAction{previous.action,previous.request,request_at}:InterruptedAction{};
             observed_plan=false; agenda_dispatched=false; monitoring_finished=false;
+            fishing_trace=FishingTrace{};
             movement_observed=false; movement_distance=0; distance_to_requested_hand=0;
             hand_changed_after_dispatch=false; initial_plan=0; initial_activity=Activity{};
             result_phase=nullptr; completion="unconfirmed"; outcome="queued_not_executed";
@@ -1456,6 +1913,7 @@ DWORD WINAPI serve(void*) {
 void initialize() {
     supported=fingerprint();
     if (!supported) { policy.reason="unsupported_executable"; return; }
+    if(policy.repeat_enabled)thinking_hook_installed=install_thinking_hook();
     HANDLE worker=CreateThread(nullptr,0,serve,nullptr,0,nullptr);
     if (worker) CloseHandle(worker);
 }

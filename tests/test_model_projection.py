@@ -87,7 +87,7 @@ class ModelProjectionTests(unittest.TestCase):
                                  'hunger_motivation_engine_units':1.4},
                          'god_hand':{'position':{'x':100,'z':200},'distance_engine_units':5}}}
         original=deepcopy(raw);value=model_turn(raw)
-        self.assertEqual(value['snapshot']['self'],{'damage':100,'hunger':40,'tiredness':15,'hunger_motivation':1.4})
+        self.assertEqual(value['snapshot']['self'],{'body':{'damage':100,'hunger':40,'tiredness':15},'motivations':{'hunger_motivation':1.4}})
         self.assertEqual(value['snapshot']['world'],{'time_of_day':'night'})
         self.assertEqual(value['snapshot']['god_hand']['alignment'],0)
         self.assertEqual(value['snapshot']['god_hand']['distance'],5)
@@ -103,7 +103,7 @@ class ModelProjectionTests(unittest.TestCase):
                 (.876, .432, .789, (12, 57, 79)), (1.1, 1.2, 1.4, (0, 0, 100))):
             with self.subTest(readings=(health,energy,exhaustion)):
                 result=model_turn({'snapshot':{'self':{'health_engine_units':health,
-                    'energy_engine_units':energy,'exhaustion_engine_units':exhaustion}}})['snapshot']['self']
+                    'energy_engine_units':energy,'exhaustion_engine_units':exhaustion}}})['snapshot']['self']['body']
                 self.assertEqual(tuple(result[key] for key in ('damage','hunger','tiredness')),expected)
                 self.assertTrue(all(type(v) is int for v in result.values()))
         self.assertEqual(model_objects({'body_engine_units':{'health':None,'warmth':-.2}}),{'body':{'warmth':-.2}})
@@ -116,15 +116,15 @@ class ModelProjectionTests(unittest.TestCase):
         source['observation']['holding']={'holding':False,'hunger_desire':1.4,'drives':drives}
         session,_,request=bound(WorldHarness(),source)
         inspected=session.call('inspect_self',{})
-        self.assertEqual(inspected['body'],{'damage':12,'hunger':30,'tiredness':24,'strength':.6})
-        self.assertEqual(inspected['holding_and_motivations']['drives'],drives)
-        self.assertEqual(inspected['holding_and_motivations']['hunger_motivation'],1.4)
+        self.assertEqual(inspected['self']['body'],{'damage':12,'hunger':30,'tiredness':24,'strength':.6})
+        self.assertEqual(inspected['self']['motivations']['drives'],drives)
+        self.assertEqual(inspected['self']['motivations']['hunger_motivation'],1.4)
         raw={'snapshot':{'self':{'health_engine_units':.88,'energy_engine_units':.7,'exhaustion_engine_units':.24}}}
         request=replace(request,current=deepcopy(raw),messages=tuple(
             {'role':'user','content':json.dumps(raw)} for _ in range(2)))
         for projected in (session.project_request(request),model_request(request)):
             for message in projected.messages:
-                self.assertEqual(json.loads(message['content'])['snapshot']['self'],
+                self.assertEqual(json.loads(message['content'])['snapshot']['self']['body'],
                                  {'damage':12,'hunger':30,'tiredness':24})
         other=model_objects({'kind':'creature','physical_traits':{'health_engine_units':.5,
             'energy_engine_units':.3,'exhaustion_engine_units':.6}})
@@ -168,10 +168,10 @@ class ModelProjectionTests(unittest.TestCase):
             'details':{'health_engine_units':.8},'lookup_handle':123}]
         session,_,request=bound(WorldHarness(),source)
         definitions={d['name']:d for d in session.definitions()}
-        for name in ('find_targets','find_objects','inspect_surrounding'):
+        for name in ('find_targets','find_objects'):
             self.assertIn('type',definitions[name]['parameters']['properties'])
             self.assertNotIn('kind',definitions[name]['parameters']['properties'])
-        found=session.call('find_objects',{'type':'cow','center':None,'offset':0,'limit':10})
+        found=session.call('find_objects',{'type':'cow','center':None,'offset':0,'limit':10,'detail':'detailed'})
         self.assertEqual(found['objects'][0],{'object_id':'cow','type':'cow','distance':20,'details':{'health':.8}})
         history={'answer':'On it.','action_target':{'object_id':'cow','kind':'animal','species':'cow','name':'cow'}}
         request=replace(request,messages=({'role':'system','content':'Example.'},

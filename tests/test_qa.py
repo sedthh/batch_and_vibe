@@ -24,7 +24,7 @@ class InspectorTests(unittest.TestCase):
                      surroundings=SurroundingsContext(True,(NearbyObject('tree','tree',5),)))
         inspector.update(obs,{},None,None,100)
         frame=inspector.payload()['current']
-        self.assertEqual(frame['model_context']['self'],{'damage':20,'hunger':40,'tiredness':20})
+        self.assertEqual(frame['model_context']['self']['body'],{'damage':20,'hunger':40,'tiredness':20})
         self.assertEqual(frame['model_context']['surroundings'],{'trees':1})
         self.assertEqual(frame['observation']['experience']['body']['health'],.8)
         self.assertIsNotNone(frame['model_update'])

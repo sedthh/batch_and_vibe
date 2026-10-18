@@ -96,7 +96,7 @@ class HandSurroundingsTests(unittest.TestCase):
             def source():
                 f=frame();f['observation']['surroundings']=asdict(c);return f
             s=DirectCreatureToolSession(source)
-            result=s.call('inspect_surrounding',{'center':'god_hand','kind':None,'limit':3})
+            result=s.call('find_objects',{'center':'god_hand','kind':None,'limit':3, 'scope':'nearby', 'detail':'detailed'})
             self.assertEqual(result['center'],'god_hand')
             self.assertEqual(len(result['objects']),count)
             if count:
@@ -115,15 +115,17 @@ class HandSurroundingsTests(unittest.TestCase):
         entry.update(distance_engine_units=1500,distance_to_god_hand_engine_units=5,object_handle=0x6200000)
         s,_=self.session(h)
         args={'center':'god_hand','kind':'tree','limit':3,'action':'move_to'}
-        target=s.call('inspect_surrounding',args)['action_targets'][0]
+        target=s.call('find_targets',{**args, 'scope':'nearby'})['action_targets'][0]
         self.assertEqual(target['distance'],1500)
         self.assertNotIn('object_handle',target)
-        self.assertFalse(s.call('inspect_surrounding',{**args,'center':'creature'}).get('action_targets'))
+        self.assertFalse(s.call('find_targets',{**args,'center':'creature', 'scope':'nearby'}).get('action_targets'))
+        previous_lease=s._targets('move_to')[0]['target_id']
         s,offer=self.session(h)
         fresh=s.call('find_targets',{'object_id':target['object_id'],'limit':3,'center':'god_hand'})['action_targets'][0]
         self.assertEqual(fresh['object_id'],target['object_id'])
-        self.assertNotEqual(fresh['target_id'],target['target_id'])
-        s.call('move_to',{'destination':{'target_id':fresh['target_id']}})
+        self.assertNotIn('target_id',fresh)
+        self.assertNotEqual(s._targets('move_to')[0]['target_id'],previous_lease)
+        s.call('move_to',{'target':fresh['object_id']})
         offer.dispatch(s.finalize_reply({})['decision'])
         h.pending.advance(h.obs(),allowed=True)
         self.assertEqual(len(h.sent),1)

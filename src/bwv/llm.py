@@ -49,11 +49,14 @@ class LLMConfig:
     history_pairs: int = 12
     history_chars: int = 24000
     wake_on_question: bool = False
+    reenable_cut_content: bool = True
     prompts: PromptSettings = field(default_factory=PromptSettings)
 
     def __post_init__(self):
         if type(self.wake_on_question) is not bool:
             raise ValueError('wake_on_question must be a boolean')
+        if type(self.reenable_cut_content) is not bool:
+            raise ValueError('reenable_cut_content must be a boolean')
         if isinstance(self.prompts,dict):
             object.__setattr__(self,'prompts',PromptSettings.parse(self.prompts))
         if not isinstance(self.prompts,PromptSettings):

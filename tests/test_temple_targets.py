@@ -23,7 +23,7 @@ class TempleTargetTests(unittest.TestCase):
         request=action_request(data['candidates']);request.current['snapshot'].update(data)
         tools=DirectCreatureToolSession(frame,action_candidates=data['candidates'])
         tools.bind_request(request)
-        result=tools.call('move_to',{'destination':{'special':'player_temple'}})
+        result=tools.call('move_to',{'target':'player_temple'})
         return offer,tools,result
 
     def test_distant_home_is_in_prompt_and_alias_dispatches_without_search(self):

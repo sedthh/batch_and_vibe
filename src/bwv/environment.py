@@ -14,6 +14,21 @@ class Environment:
     rain_engine_units: int | None = None
     snow_engine_units: int | None = None
     weather_validation: str = 'unavailable'
+    snow_on_ground: bool | None = None
+
+
+def weather_context(weather, snow_on_ground=None):
+    """Small independent facts; missing readings do not become false."""
+    result = {}
+    if isinstance(weather, dict):
+        result = {key: value for key, value in weather.items()
+                  if key in ('raining', 'snowing', 'snow_on_ground') and type(value) is bool}
+    elif weather in ('rain', 'snow', 'rain_and_snow', 'no_rain_or_snow'):
+        result = {'raining': weather in ('rain', 'rain_and_snow'),
+                  'snowing': weather in ('snow', 'rain_and_snow')}
+    if type(snow_on_ground) is bool:
+        result['snow_on_ground'] = snow_on_ground
+    return result
 
 
 def visual_day_period(hour, thresholds):

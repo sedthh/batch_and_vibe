@@ -80,7 +80,7 @@ CREATE_POT("1,2", 12, 0, 900)'''
             session = DirectCreatureToolSession(lambda:raw, action_candidates=session.inner.action_candidates)
             session.bind_request(request)
             for alias in ('portal','vortices','whirlpool'):
-                inspected = session.call('inspect_surrounding', {'kind':alias,'limit':10})
+                inspected = session.call('find_objects', {'kind':alias,'limit':10, 'scope':'nearby', 'detail':'detailed'})
                 self.assertEqual(inspected['objects'][0]['type'], 'vortex')
                 self.assertEqual(inspected['objects'][0]['portal']['direction'], 'one_way')
             found = session.call('find_objects', {'kind':'portal','center':None,'offset':0,'limit':10})
@@ -150,7 +150,7 @@ CREATE_POT("1,2", 12, 0, 900)'''
             m.typed(m.portal,b'.?AVMagicTeleport@@',30)
             portal=m.sample().context.known_objects[0]
             self.assertEqual(portal.kind,'teleport')
-            self.assertEqual(portal.portal,{'route':'same_island','direction':'two_way','temporary':True})
+            self.assertEqual(portal.portal,{'route':'same_island','direction':'two_way','temporary':True,'connected_exit_ids':[]})
             self.assertFalse(target_matches('portal',asdict(portal)))
             self.assertTrue(target_matches('teleport miracle',asdict(portal)))
             self.assertIsNone(m.reader._vortex_export)

@@ -29,8 +29,8 @@ class ObjectTypesTests(unittest.TestCase):
         request.current['snapshot'].update(data)
         session = DirectCreatureToolSession(frame, action_candidates=data['candidates'])
         session.bind_request(request)
-        found = session.call('inspect_surrounding', {'kind':'bonfire', 'limit':3,
-            'action':'cast_miracle', 'miracle':'water'})
+        found = session.call('find_targets', {'kind':'bonfire', 'limit':3,
+            'action':'cast_miracle', 'miracle':'water', 'scope':'nearby'})
         target = found['action_targets'][0]
         self.assertEqual(target['type'], 'bonfire')
         self.assertIs(target['on_fire'], True)

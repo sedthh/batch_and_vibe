@@ -38,10 +38,12 @@ def console_shutdown(request_stop):
             kernel.SetConsoleCtrlHandler(handler, False)
 
 
-async def run_managed(factory, settings_path, *, window=True, game_launcher=None, debug_session=None):
-    """Cancel once, then await all service cleanup. UI stays responsive meanwhile."""
+async def run_managed(factory, settings_path, *, window=True, game_launcher=None, debug_session=None,
+                      apply_settings=None):
+    """Stop or restart services serially, keeping the launcher responsive during cleanup."""
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()
+    restart = asyncio.Event()
     ui = None
     service = None
 
@@ -53,30 +55,56 @@ async def run_managed(factory, settings_path, *, window=True, game_launcher=None
         if ui is not None:
             ui.write(text)
 
+    def request_restart(config):
+        if stop.is_set() or restart.is_set():
+            raise ValueError('The mod is already stopping or applying settings.')
+        # Validate before stopping the working services. Only an explicit UI save
+        # reaches this callback; there is no settings-file polling.
+        apply_settings(config)
+        restart.set()
+        if ui is not None:
+            ui.set_restarting(True)
+        emit('Settings saved. Applying them to the mod...')
+
     with console_shutdown(request_stop):
         try:
             if window:
                 from .launcher_ui import StatusWindow
                 ui = StatusWindow(settings_path, request_stop)
+                if apply_settings is not None:ui.restart = request_restart
                 if game_launcher is not None:ui.set_game_launcher(game_launcher)
                 if debug_session is not None:ui.set_debug_session(debug_session)
             if debug_session is not None:debug_session.emit = emit
             emit('Stop the mod with Stop mod, the window close button, or Ctrl+C in the console. '
                  'The game stays running. Closing the game alone keeps the mod waiting for a restart.')
             service = asyncio.create_task(factory(emit))
-            cancelled = False
-            while not service.done():
-                if ui is not None:
-                    ui.pump()
-                if stop.is_set() and not cancelled:
-                    cancelled = True
-                    service.cancel()
-                await asyncio.sleep(.05)
-            try:
-                await service
-            except asyncio.CancelledError:
-                if not cancelled:
-                    raise
+            while True:
+                cancelled = False
+                debug_options = None
+                while not service.done():
+                    if ui is not None:
+                        ui.pump()
+                    # A debugger toggle/port change already in progress must
+                    # finish before its selected state is saved for the restart.
+                    debug_busy = ui is not None and getattr(ui, 'debug_task', None) is not None
+                    if not cancelled and (stop.is_set() or (restart.is_set() and not debug_busy)):
+                        if restart.is_set() and debug_session is not None:
+                            debug_options = debug_session.enabled, debug_session.port
+                        cancelled = True
+                        service.cancel()
+                    await asyncio.sleep(.05)
+                try:
+                    await service
+                except asyncio.CancelledError:
+                    if not cancelled:
+                        raise
+                if stop.is_set() or not restart.is_set():
+                    break
+                if debug_options is not None:
+                    debug_session.enabled, debug_session.port = debug_options
+                restart.clear()
+                service = asyncio.create_task(factory(emit))
+                if ui is not None:ui.set_restarting(False)
         finally:
             if service is not None and not service.done():
                 service.cancel()

@@ -23,18 +23,18 @@ compatible. No game files are included.
    Continue or load a save.
 4. Press **Ctrl+Enter** to chat with your creature. Up/Down recalls recent messages.
 
-Commands can include fishing at a known fishing area. If an action needs empty
+Commands can include fishing or drinking from natural water. If an action needs empty
 hands, the mod first asks the creature to put its held object down. If a target
 vanishes before execution, it can try another of the same kind up to twice.
 Uncertain outcomes are not repeated automatically, to avoid duplicate actions.
 Nearby context distinguishes recognized building types and fences. Inspection and
 search can use kinds such as `house`, `storage`, `nursery`, `cemetery`, `temple` or
 `fence`. These are known objects, not a complete map of everything on screen.
-Each model turn includes a compact UTC observation time and tick or message receipt
-time, separate from the island's time of day. Creature and god-hand positions use
+Model turns include elapsed seconds since the previous sent observation, separate
+from the island's time of day. Creature and god-hand positions use
 horizontal X/Z coordinates. Nearby buildings and other creatures can also show
 coordinates in inspection; portable objects keep their IDs. Use object actions
-for objects and `move_to(destination={"x":X,"z":Z})` for a ground location. Coordinates belong
+for objects and `move_to(target={"x":X,"z":Z})` for a ground location. Coordinates belong
 to the current island; they are not a permanent destination across saved games.
 The same `move_to` tool accepts an object ID, a movement target ID, or the special
 destinations `god_hand` and `player_temple`. It accepts `pace: auto`, `walk` or `run`. Approaching the god hand
@@ -42,10 +42,19 @@ defaults to running and follows its live position; ask it to walk if you prefer.
 Other movement uses the engine's pace unless the model selects one. The choice
 applies to that movement, not to later creature behaviour.
 The model can make up to six tool calls per turn by default, but select only one
-physical action. Inspection has pages of ten objects; broader object searches
-have pages of twenty. `find_targets` looks for objects suitable for an action.
+physical action. `find_objects` pages through objects, and `inspect_object` can
+read several IDs together. `find_targets` looks for objects suitable for an action.
 `do_action(action="eat")` handles feeding from stores, fields, trees and food piles.
-`use_held_object` handles putting down, eating, throwing or casting a held bubble.
+`use_held_object` handles putting down, eating, examining, bringing home, throwing
+or casting a held bubble. Examining returns available details and selects the
+native held-item animation in one call. Inspecting the creature's held item by ID
+does the same when examination is available and no other action is selected.
+Without an emoji, examination randomly chooses examine, shake or smell, never
+stroke. 🔍 chooses examine, 👂 shake/listen, 👃 smell and 🫳 stroke. These cues
+work only while the creature holds something. A cue with an inspection chooses
+that inspection's gesture; it does not add a second action. A cue alone plays
+the gesture without returning inspection details.
+Inspecting other objects or the creature's general state remains read-only.
 Search synonyms keep the object's canonical name and ID in the results.
 The creature receives a rough time-of-day phase from the engine's sky clock and
 available local rain/snow readings. Native intentions retain their
@@ -55,10 +64,14 @@ The mod attaches automatically and reconnects after game restarts. Creature acti
 and automatic thinking are enabled by default; paid providers may charge for calls.
 Use **Stop mod** or close the mod window to stop it without closing the game.
 
+While the model answers a question or thinks on a tick, the mod pauses new
+autonomous decisions. An action already underway can still finish. The pause
+ends with the model turn, including errors and timeouts; player commands and
+scene control take precedence. Other objects can still move or disappear.
+
 The launcher has **Run B&W windowed** with a size dropdown, and **Run B&W borderless
 fullscreen** using the monitor containing the launcher. Borderless is a windowed
-game with its frame removed, not native exclusive fullscreen; it still needs live
-game testing on your setup. Launching from the elevated mod inherits administrator
+game with its frame removed, not native exclusive fullscreen. Launching from the elevated mod inherits administrator
 access. Close the game before changing modes. These buttons save only the game's
 windowed/fullscreen flag and display width/height; other settings and saves are untouched.
 New model calls, including tool follow-ups, pause in unsupported fullscreen mode,
@@ -75,11 +88,15 @@ Tool, engine, observation and memory rules are fixed in code and added separatel
 the LLM debugger still shows the complete assembled prompt. Older prompt sections
 are migrated on load with a notice; saving writes the new format.
 Advanced settings and the general prompt have defaults in
-[`settings.default.json`](../src/bwv/settings.default.json). Restart the mod after
-changes, closing the game first to avoid administrator prompts during gameplay.
+[`settings.default.json`](../src/bwv/settings.default.json). **Save & apply** reloads
+the mod services inside the existing launcher; the game can stay open. Manual file
+edits are loaded when you reopen settings and save, or restart the mod.
 Recent conversation uses up to 12 exchanges and 24,000 characters. Adjust
 `history_pairs` and `history_chars` in `settings.json`; larger limits use more
 input tokens. Saved memories persist separately from this rolling history.
+Reinstalling with `Setup-Mod.cmd` or `Start-Mod.cmd --install` clears the saved
+chat history so old tool usage does not confuse the new build. Saved creature
+memories are kept. An ordinary mod restart keeps both.
 
 Fixed instructions go before changing memory and observations to help provider
 prompt caches. GPT-5.4-mini uses automatic prefix caching, with no extra cache-write
@@ -138,8 +155,22 @@ For held objects, `use_held_object("discard", null)` tosses the item away withou
 aiming. Use `put_down` for gentle placement or `throw_at` for a chosen destination.
 Vomiting and untargeted discard are wired but still need in-game confirmation.
 
-Fishing uses the nearest spot chosen by the game. To fish in a different area,
-ask the creature to move there first. Poo uses a target for positioning; it does
+`use_held_object(action="bring_home", target=null)` carries the currently held
+item to the creature's native home and releases it there. Food, toys and other
+items share this one call; movement and release are handled by the game.
+Bring-home delivery has been tested through both dummy commands and real chat.
+
+`do_action(action="fish", target="god_hand")` catches fish and delivers them to
+the hand's ground position when the command starts. It does not follow a moving
+hand. Use `self` to catch and eat, `player_temple` to bring fish home, or a storage
+or worship-site object ID to supply it. Hand delivery has been tested; the other
+delivery destinations still need live checks. Fishing uses the nearest spot
+chosen by the game. Drinking uses
+`do_action(action="drink", target="self", miracle=null)`; the game finds natural
+water and handles approaching it. Move near the desired river, pond or shore
+first to drink in that area. Water miracles cannot be drunk.
+To fish in a different area, ask the creature to move there first.
+Poo uses a target for positioning; it does
 not guarantee hitting or fertilizing it. Casting and throwing aim at a target,
 but starting or ending an animation does not prove the effect landed.
 
@@ -172,3 +203,17 @@ Claude features and keys requiring a workspace header are not supported yet.
 Gemini uses Google's [compatible endpoint](https://ai.google.dev/gemini-api/docs/openai)
 with a Google AI Studio API key (`GEMINI_API_KEY`). Use your chosen Gemini model ID;
 reasoning options depend on the model. Claude and Gemini presets have not been live-tested.
+
+The model uses `find_objects` for nearby or known objects, and `find_targets` for
+action-compatible targets. Object descriptions can be brief or detailed.
+`inspect_object` accepts a list of `object_ids` and optional detail sections, so it
+can compare town needs or creature traits in one call. All physical tools use
+`target`; `move_to` also accepts `{x,z}`. Tick context and `inspect_self` share
+`self.body`, `self.held_object`, `self.motivations`, `self.learning` and `activity`.
+
+Existing Teleport gates are separate from island vortexes. When a gate is near
+the creature or god hand, its connected gates are also available to inspect.
+`do_action(action="use_teleport", target=exit_gate_id)` selects the destination
+gate and approaches another entrance in the same network. It uses existing gates,
+not a new miracle; gates can expire or be unreachable. Ordinary `move_to` only
+approaches a gate.

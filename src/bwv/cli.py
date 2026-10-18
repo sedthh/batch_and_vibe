@@ -142,6 +142,11 @@ def main() -> int:
         elif args.command == "install-observer":
             from .install import install
             result = install(args.game, args.bridge, experimental=args.experimental)
+            from .memory_store import clear_installed_history
+            result.update(clear_installed_history())
+            if not result['history_cleared']:
+                raise RuntimeError('The bridge is installed, but some saved chat history could not be cleared. '
+                                   'Those files were preserved. Close the mod and retry Start-Mod.cmd --install.')
         else:
             from .install import uninstall
             uninstall(args.game)
