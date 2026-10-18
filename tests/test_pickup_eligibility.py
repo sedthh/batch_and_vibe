@@ -62,7 +62,7 @@ class PickupEligibilityTests(unittest.TestCase):
         self.assertEqual(result['unavailable_targets'][0]['miracle'],'heal')
         self.assertNotIn('miracle',all_bubbles[-1])
         water=s.call('find_targets',{'kind':'water','action':'pick_up','limit':1})['action_targets'][0]
-        self.assertEqual(s.call('do_action',{'action':'pick_up','target':water['target_id']})['status'],
+        self.assertEqual(s.call('do_action',{'action':'pick_up','target':water['object_id']})['status'],
                          'selected_pending_final_reply')
 
     def test_invalid_metadata_and_missing_flag_are_distinct(self):

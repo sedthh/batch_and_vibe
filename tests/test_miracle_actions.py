@@ -114,8 +114,8 @@ class MiracleProtocolTests(unittest.IsolatedAsyncioTestCase):
                         rejected=json.loads(outputs[-1])
                         self.assertEqual(rejected['reason'],'invalid_limit')
                         self.assertFalse(rejected['executed'])
-                    response=call(api,'inspect_surrounding',{'kind':'tree','limit':99 if n==1 else 3,
-                        'action':'cast_miracle','miracle':'water'},'inspect'+str(n))
+                    response=call(api,'find_targets',{'kind':'tree','limit':99 if n==1 else 3,
+                        'action':'cast_miracle','miracle':'water', 'scope':'nearby'},'inspect'+str(n))
                 elif n==3:
                     target=json.loads(outputs[-1])['action_targets'][0]['target_id']
                     response=call(api,'do_action',{'action':'cast_miracle','miracle':'water','target':target},'cast')
@@ -136,8 +136,8 @@ class MiracleProtocolTests(unittest.IsolatedAsyncioTestCase):
         h=MiracleHarness();calls=[]
         def handler(req):
             calls.append(1)
-            return httpx.Response(200,json=call('responses','inspect_surrounding',
-                {'kind':'tree','limit':99,'action':'cast_miracle','miracle':'water'},'bad'+str(len(calls))))
+            return httpx.Response(200,json=call('responses','find_targets',
+                {'kind':'tree','limit':99,'action':'cast_miracle','miracle':'water', 'scope':'nearby'},'bad'+str(len(calls))))
         runtime=self.start(handler,'responses',factory=h.factory,wait=True,clock=lambda:h.now,source=h.source())
         with self.assertRaisesRegex(RuntimeError,'ProviderError'):
             await runtime.question({'question':'Water a tree'})
@@ -152,7 +152,7 @@ class MiracleProtocolTests(unittest.IsolatedAsyncioTestCase):
                 h=MiracleHarness();wires=[]
                 def handler(req):
                     wires.append(json.loads(req.content))
-                    if len(wires)==1:response=call(api,'inspect_surrounding',{'kind':None,'limit':10,'action':'cast_miracle','miracle':'heal' if action=='cast_heal_self' else 'water'},'inspect')
+                    if len(wires)==1:response=call(api,'find_targets',{'kind':None,'limit':10,'action':'cast_miracle','miracle':'heal' if action=='cast_heal_self' else 'water', 'scope':'nearby'},'inspect')
                     elif len(wires)==2:
                         wire=wires[-1]
                         outputs=([i['output'] for i in wire['input'] if i.get('type')=='function_call_output']

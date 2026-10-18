@@ -97,6 +97,21 @@ def validate_reader(pid):
         snapshot(pid, timeout_ms=750)
 
 
+async def sync_cut_content(pid, frame, enabled, notices):
+    """Send only when a new bridge/setting differs; reuse the observer's frame."""
+    if pid is None:return
+    probe=(frame.get('diagnostics') or {}).get('action_probe') or {}
+    if not probe:return
+    if probe.get('cut_content',{}).get('enabled') is enabled:return
+    from .action_probe import configure_cut_content
+    try:
+        await asyncio.to_thread(configure_cut_content,pid,enabled)
+    except (OSError,ValueError,TimeoutError) as error:
+        notices.show('cut_content',f'Recovered-content setting: {error}',error=True)
+    else:
+        notices.show('cut_content','Recovered content enabled.' if enabled else 'Recovered content disabled.')
+
+
 async def play(root, settings, settings_path, *, dummy=False, actions=True, debug=False,
                overlay=True, automatic=True, seconds=43200, port=0, emit=print, debug_session=None):
     from .qa_live import serve
@@ -117,7 +132,8 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
         nonlocal overlay_process
         runtime_ref.append(runtime)
         runtime.set_display_blocker(display.reason)
-        emit('Dummy backend: no API calls.' if dummy else 'Using the provider and model in settings.json.', flush=True)
+        emit('Dummy backend: no API calls.' if dummy else
+             f'Using model {settings.model} from the configured settings.', flush=True)
         emit('Creature actions enabled.' if actions else 'Diagnostic chat-only mode: creature actions disabled by --no-actions.', flush=True)
         emit('Automatic creature thinking enabled.' if automatic else 'Automatic creature thinking off; direct questions remain available.', flush=True)
         if overlay:
@@ -143,6 +159,7 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
             notices.show('display', MESSAGES.get(reason,'Creature chat display ready.') if reason
                          else 'Creature chat display ready; model calls may resume when gameplay allows.')
             frame = inspector.latest_frame() or {}
+            await sync_cut_content(supervisor.pid,frame,settings.reenable_cut_content and actions,notices)
             error = frame.get('diagnostics', {}).get('error')
             if error:
                 notices.show('sensor', f'Sensor error: {error}. Unavailable readings are omitted; observation continues.', error=True)

@@ -1,4 +1,4 @@
-"""Read the sky clock and current local precipitation cache. No engine calls."""
+"""Read the sky clock, local precipitation and ground snow. No engine calls."""
 import struct
 import time
 
@@ -75,9 +75,11 @@ def read_environment(reader, observer):
     thresholds = struct.unpack('<4f', raw)[::-1]
     period = visual_day_period(hour, thresholds)
     weather, rain, snow, weather_validation = local_precipitation(reader, head)
+    from .ground_snow_live import snow_on_ground
+    ground_snow = snow_on_ground(reader, head)
     if reader.read(SKY_THRESHOLDS, 16) != raw or reader._head() != head:
         raise ValueError('Environment changed during observation')
     from .pipe import snapshot
     if reader._session(snapshot(reader.pid)) != session or time.monotonic()-started > .75:
         raise ValueError('Stale environment observation')
-    return Environment(period, hour, 'engine_visual_clock', weather, rain, snow, weather_validation)
+    return Environment(period, hour, 'engine_visual_clock', weather, rain, snow, weather_validation, ground_snow)

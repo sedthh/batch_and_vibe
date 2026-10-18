@@ -26,6 +26,8 @@ class LauncherTests(unittest.TestCase):
                 installer=stack.enter_context(patch('bwv.install.update'))
                 verify=stack.enter_context(patch('bwv.launcher.check_installed',side_effect=ValueError('fixture') if variant=='bad_verification' else None))
                 popup=stack.enter_context(patch('bwv.launcher.show_install_success'))
+                cleanup=stack.enter_context(patch('bwv.memory_store.clear_installed_history',
+                    return_value={'history_cleared':True,'failed_stores':0}))
                 stack.enter_context(redirect_stdout(io.StringIO()))
                 bridge=Mock();bridge.is_file.return_value=variant!='no_build'
                 if variant in ('running','no_build','bad_verification'):
@@ -34,6 +36,7 @@ class LauncherTests(unittest.TestCase):
                 else:ensure_installed(Path('synthetic-game'),bridge)
                 self.assertEqual(installer.call_count,int(variant in ('success','bad_verification')))
                 self.assertEqual(popup.call_count,int(variant=='success'))
+                self.assertEqual(cleanup.call_count,int(variant=='success'))
                 if variant=='success':popup.assert_called_once_with(continuing=True)
                 if variant=='existing':verify.assert_called_once()
 

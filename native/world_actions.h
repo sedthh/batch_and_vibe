@@ -1,6 +1,7 @@
 // Named agenda recipes and request-bound targets; no arbitrary native calls.
 #pragma once
 #include "throw_targets.h"
+#include "individual_gesture.h"
 namespace bwv_probe {
 struct WorldRecipe {
     const char* name; uint32_t plan,spell; const char* label; uintptr_t constructor;
@@ -8,6 +9,7 @@ struct WorldRecipe {
     // Optional fixed argument for a native single body-animation sequence.
     int32_t body_animation=-1;
     uint32_t held_category=0;
+    bool fish_to_hand=false;
 };
 constexpr uint32_t location_targets=all_object_kinds;
 constexpr uint32_t living_targets=(1u<<3)|(1u<<5)|(1u<<10);
@@ -16,15 +18,25 @@ inline constexpr WorldRecipe world_recipes[]={
     // FishAndEat finds the closest FishFarm to the creature itself; it does not
     // read either agenda target. Never present a fishing-area ID as binding it.
     {"fish",155,0,"FishAndEat",0x4AB350,0,true},
+    {"fish_to_hand",259,0,"TakeFishHome",0x4BA4B0,0,true,-1,0,true},
+    {"fish_home",259,0,"TakeFishHome",0x4BA4B0,0,true},
+    {"fish_to_storage",29,0,"GiveFishToStoragePit",0x4AB610,1u<<16,false},
+    {"fish_to_worship",300,0,"PutFishByWorshipSite",0x4B8510,1u<<24,false},
+    // DrinkFromTheSea finds its own natural-water point; neither agenda target
+    // selects a body of water. The native path handles movement and drinking.
+    {"drink",55,0,"DrinkFromTheSea",0x4A15F0,0,true},
+    // Target is the EXIT. Dispatch resolves an entrance in the same network,
+    // registers the onward destination and builds the native travel agenda.
+    {"use_teleport",134,0,"GoToTeleport",0x4A9120,1u<<30,false},
     {"attack",236,0,"Kick",0x4B6C80,any_targets,false},
     {"poo_on",19,0,"Poo",0x49ABB0,location_targets,false},
     {"sit_down",81,0,"SitDown",0x4A4AB0,0,true},
     {"look_at_player",82,0,"LookAtCamera",0x4A4ED0,0,true},
-    {"howl",75,0,"Scratch",0x4A4280,0,true,200},
-    {"laugh",75,0,"Scratch",0x4A4280,0,true,201},
-    {"cry",75,0,"Scratch",0x4A4280,0,true,202},
-    {"show_realization",75,0,"Scratch",0x4A4280,0,true,203},
-    {"pray",75,0,"Scratch",0x4A4280,0,true,204},
+    {"howl",75,0,"Scratch",0x4A4280,0,true,body_howl},
+    {"laugh",75,0,"Scratch",0x4A4280,0,true,body_laugh},
+    {"cry",75,0,"Scratch",0x4A4280,0,true,body_cry},
+    {"show_realization",75,0,"Scratch",0x4A4280,0,true,body_realization},
+    {"pray",75,0,"Scratch",0x4A4280,0,true,body_pray},
     {"cast_fireball",46,1,"CastFireball",0x49F7D0,any_targets,false},
     {"cast_fireball_pu1",96,2,"CastFireballPU1",0x49F7D0,any_targets,false},
     {"cast_fireball_pu2",97,3,"CastFireballPU2",0x49F7D0,any_targets,false},
@@ -88,6 +100,7 @@ template<class Type>
 bool world_target_supported(const WorldRecipe& recipe,const ThrowPoint& point,Type type) {
     if(!point.object || !point.kind || point.kind>target_kind_count
             || !(recipe.kinds&(1u<<point.kind)))return false;
+    if(point.kind==30)return recipe.plan==134 || recipe.plan==122;
     // RunToObject's approach subaction only moves toward Object instances.
     // The dispatcher supplies point movement for containers. Forest casts at
     // the selected position; other recipes need a physical recipient/approach.
@@ -116,7 +129,9 @@ struct WorldOffers {
         }
         for(size_t i=0;i<length && n<capacity && owner;++i) {
             auto e=proposed[i];
-            if(e.recipe>=world_recipe_count || !e.target.object || (!e.self && !e.target.belief) || !e.target.table) continue;
+            if(e.recipe>=world_recipe_count || !e.target.object || !e.target.table) continue;
+            if(!e.self && !e.target.belief && !(e.target.kind==30
+                    && (world_recipes[e.recipe].plan==134 || world_recipes[e.recipe].plan==122)))continue;
             e.token=0;
             for(size_t j=first[e.recipe];j<last[e.recipe];++j) {
                 const auto& old=entries[j];

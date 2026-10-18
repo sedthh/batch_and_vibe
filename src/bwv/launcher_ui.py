@@ -1,5 +1,5 @@
 """Small local launcher/settings windows. No network calls or credential display."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import os
 from pathlib import Path
@@ -46,6 +46,8 @@ def save_basics(path, values, key=''):
     data = asdict(LLMConfig.load(path))
     if 'general_prompt' in values:
         data['prompts'] = {'general': values['general_prompt']}
+    if 'reenable_cut_content' in values:
+        data['reenable_cut_content'] = values['reenable_cut_content']
     for field in ('model', 'api', 'base_url', 'output_format', 'token_parameter'):
         data[field] = values[field].strip()
     data['api_key_env'] = values['api_key_env'].strip() or None
@@ -106,7 +108,7 @@ def save_basics(path, values, key=''):
 
 
 class SettingsWindow:
-    def __init__(self, path, parent=None):
+    def __init__(self, path, parent=None, *, on_saved=None):
         import tkinter as tk
         from tkinter import ttk
         from tkinter.scrolledtext import ScrolledText
@@ -118,7 +120,8 @@ class SettingsWindow:
         self.values = {}
         frame = ttk.Frame(self.root, padding=16); frame.pack(fill='both', expand=True)
         ttk.Label(frame, text='Model and basic settings', font=('Segoe UI', 12, 'bold')).pack(anchor='w')
-        ttk.Label(frame, text='Saved locally. Restart the mod to apply changes. Saving sends no API requests.').pack(anchor='w', pady=(4, 10))
+        ttk.Label(frame, text=('Save to apply changes. The game can stay open.' if on_saved else
+            'Saved locally for the next mod start. Saving sends no API requests.')).pack(anchor='w', pady=(4, 10))
         tabs = ttk.Notebook(frame); tabs.pack(fill='both', expand=True)
         connection = ttk.Frame(tabs, padding=12); tabs.add(connection, text='Connection')
         limits = ttk.Frame(tabs, padding=12); tabs.add(limits, text='Limits')
@@ -161,7 +164,7 @@ class SettingsWindow:
         field(connection, 'output_format', 'Structured output format', ('json_schema', 'json_object'))
         field(connection, 'token_parameter', 'Chat Completions token field', ('max_completion_tokens', 'max_tokens'))
         ttk.Label(connection, text='Presets fill connection options and clear the model, reasoning choice and unsaved key.\n'
-            'Enter a model ID and key for that provider; changes take effect only after saving and restarting.\n'
+            'Enter a model ID and key for that provider, then save your settings.\n'
             'Custom/local servers need their own base URL and supported formats.\n'
             'Claude uses its compatibility API: schema enforcement and reasoning controls are unavailable.\n'
             'Variable name: e.g. OPENAI_API_KEY, not the secret key. Leave it blank only if no key is required.\n'
@@ -197,15 +200,22 @@ class SettingsWindow:
             try:
                 values = {k: v.get() for k, v in self.values.items()}
                 values['general_prompt'] = self.general_prompt.get('1.0', 'end-1c')
-                save_basics(self.path, values, self.key.get())
+                saved = save_basics(self.path, values, self.key.get())
             except (ValueError, OSError) as error:
                 self.error.set(str(error))
                 return
             self.key.set('')
-            print('Settings saved. Restart the mod to apply them. No model call was made.', flush=True)
+            if on_saved is not None:
+                try:
+                    on_saved(saved)
+                except (ValueError, OSError) as error:
+                    self.error.set(f'Settings saved but not applied: {error}')
+                    return
+            else:
+                print('Settings saved for the next mod start. No model call was made.', flush=True)
             self.root.destroy()
 
-        ttk.Button(buttons, text='Save settings & close', command=save).pack(side='right')
+        ttk.Button(buttons, text='Save & apply' if on_saved else 'Save settings & close', command=save).pack(side='right')
         ttk.Button(buttons, text='Cancel', command=self.root.destroy).pack(side='right', padx=8)
         def open_file():
             try:
@@ -220,6 +230,7 @@ class StatusWindow:
         import tkinter as tk
         from tkinter import ttk
         from tkinter.scrolledtext import ScrolledText
+        self.settings_path = Path(path)
         self.display_settings_path = Path(path).parent / '.local' / 'launcher-display.json'
         self.root = tk.Tk()
         self.root.title(WINDOW_TITLE)
@@ -233,6 +244,8 @@ class StatusWindow:
         self.log.pack(fill='both', expand=True)
         buttons = ttk.Frame(frame); buttons.pack(fill='x', pady=(10, 0))
         self.stopping = False
+        self.restarting = False
+        self.restart = None
         self.settings_window = None
         self.game_launcher = None
         self.game_buttons = []
@@ -240,6 +253,11 @@ class StatusWindow:
         self.debug_task = None
         self.game_controls = ttk.Frame(frame)
         self.game_controls.pack(fill='x', before=buttons, pady=(6, 0))
+        self.saved_cut_content = LLMConfig.load(path).reenable_cut_content
+        self.cut_content_enabled = tk.BooleanVar(value=self.saved_cut_content)
+        self.cut_content_toggle = ttk.Checkbutton(frame, text='Reenable cut content',
+            variable=self.cut_content_enabled, command=self.remember_cut_content)
+        self.cut_content_toggle.pack(anchor='w', after=self.game_controls, pady=(6, 0))
 
         def settings():
             if self.stopping:
@@ -248,7 +266,8 @@ class StatusWindow:
                 if self.settings_window is not None and self.settings_window.root.winfo_exists():
                     self.settings_window.root.lift()
                 else:
-                    self.settings_window = SettingsWindow(path, self.root)
+                    self.settings_window = SettingsWindow(path, self.root,
+                        on_saved=self.apply_settings)
             except (ValueError, OSError) as error:
                 self.write(f'ERROR: Cannot open settings: {error}')
 
@@ -261,6 +280,7 @@ class StatusWindow:
             self.write('Stopping the mod and closing its services...')
             self.stop_button.configure(text='Stopping…', state='disabled')
             self.settings_button.configure(state='disabled')
+            self.cut_content_toggle.configure(state='disabled')
             for button in self.game_buttons:button.configure(state='disabled')
             if self.settings_window is not None and self.settings_window.root.winfo_exists():
                 self.settings_window.root.attributes('-disabled', True)
@@ -273,14 +293,28 @@ class StatusWindow:
         self.stop_button.pack(side='right')
         self.root.protocol('WM_DELETE_WINDOW', close)
 
+    def apply_settings(self, config):
+        if getattr(self, 'restart', None) is not None:
+            self.restart(config)
+        else:
+            self.write(f'Model saved: {config.model}. Restart the mod to apply changes.')
+
+    def set_restarting(self, restarting):
+        self.restarting = restarting
+        if self.stopping:return
+        self.heading.configure(text='Applying settings...' if restarting else 'Creature mod is running')
+        for button in (self.settings_button, self.cut_content_toggle):
+            button.configure(state='disabled' if restarting else 'normal')
+        self.refresh_game_buttons()
+
     def set_debug_session(self, session):
         import asyncio
         import tkinter as tk
         from tkinter import ttk
         self.debug_session = session
         controls = ttk.LabelFrame(self.game_controls.master, text='Debugging', padding=6)
-        controls.pack(fill='x', after=self.game_controls, pady=(6, 0))
-        self.root.geometry('780x470')
+        controls.pack(fill='x', after=self.cut_content_toggle, pady=(6, 0))
+        self.root.geometry('780x500')
         self.root.minsize(650, 400)
         self.debug_enabled = tk.BooleanVar(value=session.enabled)
         self.debug_port = tk.StringVar(value=str(session.port) if session.port else '')
@@ -335,7 +369,7 @@ class StatusWindow:
         session = self.debug_session
         if session is None:
             return
-        ready = session.runtime is not None and not self.stopping and self.debug_task is None
+        ready = session.runtime is not None and not self.stopping and not self.restarting and self.debug_task is None
         self.debug_toggle.configure(state='normal' if ready else 'disabled')
         self.debug_port_entry.configure(state='normal' if ready else 'disabled')
         self.debug_apply.configure(state='normal' if ready and session.enabled else 'disabled')
@@ -351,7 +385,7 @@ class StatusWindow:
         from tkinter import ttk
         from .game_display import RESOLUTIONS
         self.game_launcher=launcher
-        self.root.geometry('760x390')
+        self.root.geometry('760x420')
         self.size=tk.StringVar(value=self.load_display_size())
         self.size.trace_add('write',self.remember_display_size)
         ttk.Combobox(self.game_controls,textvariable=self.size,values=RESOLUTIONS,
@@ -363,6 +397,25 @@ class StatusWindow:
             button=ttk.Button(self.game_controls,text=label,command=lambda mode=mode:start(mode))
             button.pack(side='left',padx=(0,8));self.game_buttons.append(button)
         self.refresh_game_buttons()
+
+    def remember_cut_content(self):
+        if self.stopping:
+            self.cut_content_enabled.set(self.saved_cut_content)
+            return
+        enabled = self.cut_content_enabled.get()
+        try:
+            config = LLMConfig.load(self.settings_path)
+            updated = replace(config, reenable_cut_content=enabled)
+            updated.save(self.settings_path)
+        except (OSError, ValueError) as error:
+            self.cut_content_enabled.set(self.saved_cut_content)
+            self.write(f'ERROR: Could not save cut content setting. {error}')
+            return
+        self.saved_cut_content = enabled
+        try:
+            self.apply_settings(updated)
+        except (ValueError, OSError) as error:
+            self.write(f'ERROR: Cut content setting saved but not applied: {error}')
 
     def load_display_size(self):
         from .game_display import RESOLUTIONS
@@ -407,7 +460,8 @@ class StatusWindow:
         if error!=previous:
             self.game_installation_error=error
             self.write('ERROR: '+error if error else 'Game installation is available again.')
-        disabled=self.stopping or bool(error) or self.game_launcher is None or self.game_launcher.busy
+        disabled=(self.stopping or getattr(self, 'restarting', False) or bool(error)
+                  or self.game_launcher is None or self.game_launcher.busy)
         for button in self.game_buttons:
             button.configure(state='disabled' if disabled else 'normal')
 

@@ -24,8 +24,12 @@ class NearbyObject:
     owner_god_id: str | None = None
     owner_link: str | None = None
     engine_class: str | None = None
+    object_type: str | None = None
 
     def __post_init__(self):
+        from .object_types import OBJECT_SUBTYPES
+        if self.object_type is not None and self.object_type not in OBJECT_SUBTYPES:
+            raise ValueError('Invalid nearby object subtype')
         from .island import god_id
         if self.owner_god_id is not None and (self.kind != 'creature' or not god_id(self.owner_god_id)):
             raise ValueError('Invalid creature owner')

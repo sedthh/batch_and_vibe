@@ -9,7 +9,7 @@ inline constexpr size_t known_target_capacity=2*object_target_capacity+1;
 inline constexpr size_t world_target_capacity=2048;
 inline constexpr double nearby_target_distance=120;
 inline constexpr double known_target_distance=20000;
-inline constexpr unsigned target_kind_count=29;
+inline constexpr unsigned target_kind_count=30;
 inline constexpr uint32_t all_object_kinds=(1u<<(target_kind_count+1))-2;
 // Hurl takes the destination as the primary action belief and the projectile
 // as the secondary action belief. ThrowObjectInHand instead reads the nearest
@@ -38,7 +38,7 @@ inline unsigned target_importance(const ThrowPoint& p) {
     if(p.kind==5)return 2;
     if(p.kind==3 && p.person_state>=13 && p.person_state<=15)return 3;
     if(p.kind==3 && p.important_person)return 4;
-    if(p.kind==3 || p.kind==6 || p.kind==21 || p.kind==22)return 5;
+    if(p.kind==3 || p.kind==6 || p.kind==21 || p.kind==22 || p.kind==30)return 5;
     if(p.kind==4 || p.kind==12 || (p.kind>=16 && p.kind<=24))return 6;
     if(p.kind==11 || p.kind==13)return 7;
     if(p.kind==8 || p.kind==9 || p.kind==10 || p.kind==14 || p.kind==15 || p.kind==26)return 8;
@@ -186,7 +186,7 @@ inline const char* throw_kind_name(unsigned kind) {
     const char* names[]={"unknown","tree","rock","villager","house","creature","temple","toy",
         "food_pile","wood_pile","animal","miracle_bubble","field","miracle_dispenser",
         "fishing_area","animal_group","storage","nursery","cemetery","workshop",
-        "wonder","town_centre","totem","windmill","worship_site","fence","mushroom","bonfire","scaffolding","object"};
+        "wonder","town_centre","totem","windmill","worship_site","fence","mushroom","bonfire","scaffolding","object","teleport"};
     return kind<=target_kind_count?names[kind]:"unknown";
 }
 }

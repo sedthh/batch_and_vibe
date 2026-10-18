@@ -38,7 +38,11 @@ def _type(rule):
         return ' | '.join(json.dumps(v,ensure_ascii=False) for v in rule['enum'])
     if rule.get('type')=='object':
         return '{'+', '.join(f'{key}: {_type(value)}' for key,value in rule.get('properties',{}).items())+'}'
-    if rule.get('type')=='array':return '['+_type(rule['items'])+']'
+    if rule.get('type')=='array' or 'array' in rule.get('type', []):
+        label='['+_type(rule['items'])+']'
+        if rule.get('minItems') is not None or rule.get('maxItems') is not None:
+            label+=f" ({rule.get('minItems',0)}..{rule.get('maxItems','any')} items)"
+        return label+(' | null' if 'null' in rule.get('type',[]) else '')
     kind=rule.get('type','value')
     label=' | '.join(kind) if isinstance(kind,list) else kind
     bounds=[]

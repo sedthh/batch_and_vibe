@@ -24,10 +24,10 @@ class DirectToolsTests(unittest.TestCase):
             {'object_id':object_id,'kind':'creature','species':'lion','distance_engine_units':20,
              'physical_traits':{'fatness_engine_units':.4,'size_compared_to_you':'larger_than_you'}},
             {'object_id':'unrelated','kind':'creature','species':'bear','distance_engine_units':30}]
-        inspected=s.call('inspect_surrounding',{'kind':'creature','limit':3,'action':'move_to'})
-        self.assertEqual(inspected['objects'][0]['type'],'lion creature')
+        inspected=s.call('find_targets',{'kind':'creature','limit':3,'action':'move_to', 'scope':'nearby'})
         self.assertEqual(inspected['action_targets'][0]['type'],'lion creature')
-        self.assertEqual(inspected['objects'][0]['physical_traits']['fatness'],.4)
+        self.assertEqual(inspected['action_targets'][0]['type'],'lion creature')
+        self.assertEqual(inspected['action_targets'][0]['physical_traits']['fatness'],.4)
         found=s.call('find_targets',{'kind':'creature','limit':3,'scope':'known'})
         self.assertEqual(found['action_targets'][0]['type'],'lion creature')
         self.assertEqual(found['action_targets'][0]['physical_traits']['size_compared_to_you'],'larger_than_you')
@@ -46,7 +46,7 @@ class DirectToolsTests(unittest.TestCase):
                 offer=h.pending.factory(h.obs());data=offer.offer()
                 request=action_request(data['candidates']);request.current['snapshot'].update(data)
                 s=DirectCreatureToolSession(frame,action_candidates=data['candidates']);s.bind_request(request)
-                near=s.call('inspect_surrounding',{'kind':'house','limit':3,'action':'move_to'})
+                near=s.call('find_targets',{'kind':'house','limit':3,'action':'move_to', 'scope':'nearby'})
                 self.assertEqual(bool(near.get('action_targets')),distance<=360)
                 far=s.call('find_targets',{'kind':'house','limit':3,'scope':'distant'})
                 self.assertEqual(bool(far.get('action_targets')),distance>360)
@@ -134,7 +134,7 @@ class DirectToolsTests(unittest.TestCase):
         offer=h.pending.factory(h.obs());data=offer.offer()
         request=action_request(data['candidates']);request.current['snapshot'].update(data)
         s=DirectCreatureToolSession(frame,action_candidates=data['candidates']);s.bind_request(request)
-        near=s.call('inspect_surrounding',{'kind':'field','limit':10,'action':'move_to'})
+        near=s.call('find_targets',{'kind':'field','limit':10,'action':'move_to', 'scope':'nearby'})
         self.assertNotIn('action_targets',near)
         self.assertEqual(near['status'],'no_compatible_target_nearby')
         found=s.call('find_targets',{'kind':'field','limit':3,'scope':'distant'})
@@ -177,7 +177,7 @@ class DirectToolsTests(unittest.TestCase):
         data=h.pending.factory(h.obs()).offer()
         request=action_request(data['candidates']);request.current['snapshot'].update(data)
         s=DirectCreatureToolSession(frame,action_candidates=data['candidates']);s.bind_request(request)
-        result=s.call('inspect_surrounding',{'kind':'field','limit':3,'action':'poo_on'})
+        result=s.call('find_targets',{'kind':'field','limit':3,'action':'poo_on', 'scope':'nearby'})
         self.assertEqual(len(result['action_targets']),1)
         self.assertEqual(s.call('do_action',{'action':'poo_on',
             'target':result['action_targets'][0]['target_id']})['status'],'selected_pending_final_reply')
@@ -189,14 +189,15 @@ class DirectToolsTests(unittest.TestCase):
         generated=tool_documentation(session.definitions())
         self.assertIn('### find_targets',generated)
         self.assertIn('### move_to',generated)
-        self.assertIn('- destination:',generated)
+        self.assertIn('- target:',generated)
         self.assertIn('object_id directly',TOOL_CONTRACT)
-        self.assertIn('Search and inspection never execute actions',TOOL_CONTRACT)
+        self.assertIn('Search is read-only',TOOL_CONTRACT)
+        self.assertIn('Inspecting your own held item can select examination',TOOL_CONTRACT)
 
     def test_inspect_returns_only_compatible_spell_targets_and_selects_once(self):
         _,_,s,_=self.session()
         args={'kind':None,'limit':10,'action':'cast_miracle','miracle':'food'}
-        target=s.call('inspect_surrounding',args)['action_targets'][0]['target_id']
+        target=s.call('find_targets',{**args, 'scope':'nearby'})['action_targets'][0]['target_id']
         bad=s.call('do_action',{'action':'cast_miracle','miracle':'wood','target':target})
         self.assertEqual(bad['status'],'invalid_target')
         result=s.call('do_action',{'action':'cast_miracle','miracle':'food','target':target})
@@ -212,6 +213,23 @@ class DirectToolsTests(unittest.TestCase):
         self.assertEqual(s.finalize_reply({})['decision']['candidate'],'cast_creature_strong')
         _,_,s,_=self.session()
         self.assertEqual(s.call('do_action',{'action':'cast_miracle','miracle':'food','target':'self'})['status'],'invalid_target')
+
+    def test_cast_with_emoji_keeps_spell_and_discards_gesture(self):
+        from bwv.action_probe import COMMAND
+        for emoji in ('👋','🔍','👂','👃','🫳'):
+            h,offer,session,_=self.session()
+            target=session.call('find_targets',{'kind':None,'limit':10,
+                'action':'cast_miracle','miracle':'food','scope':'nearby'})['action_targets'][0]['target_id']
+            session.call('do_action',{'action':'cast_miracle','miracle':'food','target':target})
+            reply=session.finalize_reply({'answer':'I will try. '+emoji})
+            self.assertEqual(reply['decision'],{'candidate':'cast_food','target':target})
+            offer.dispatch(reply['decision'])
+            self.assertEqual(speech_expression(reply['answer'],reply['decision'],dispatcher=offer)['status'],
+                             'skipped_action_conflict')
+            self.assertEqual(display_speech(reply['answer']),'I will try.')
+            for _ in range(3):h.pending.advance(h.obs(),allowed=True)
+            self.assertEqual(len(h.sent),1)
+            self.assertEqual(COMMAND.unpack(h.sent[0])[-2],19)
 
     def test_bad_arguments_do_not_select_any_action(self):
         for args in ({'action':'cast_miracle','miracle':'made_up','target':'self'},

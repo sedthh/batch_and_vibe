@@ -52,7 +52,8 @@ def show_install_success(*, continuing=False, uninstall=False):
                'The original game DLL has been restored.\n'
                'Your saves, mod settings and creature memory were kept.' if uninstall else
                'Installation completed successfully.\n\n'
-               'The mod bridge is installed and verified.\n\n'
+               'The mod bridge is installed and verified.\n'
+               'Chat history cleared. Saved memories kept.\n\n'
                + ('Press OK to continue starting the mod.' if continuing else
                   'Start the mod with Start-Mod.cmd before launching Black & White.'))
     try:
@@ -151,6 +152,18 @@ def check_installed(root):
         raise ValueError('Installed bridge or original backup differs from its manifest. Repair the installation before starting.')
 
 
+def finish_install(root):
+    """Verify first, then retire conversation data from the previous tool set."""
+    check_installed(root)
+    print('Bridge installed and verified.', flush=True)
+    from .memory_store import clear_installed_history
+    result = clear_installed_history()
+    if not result['history_cleared']:
+        raise RuntimeError('The bridge is installed, but some saved chat history could not be cleared. '
+                           'Those files were preserved. Close the mod and retry --install.')
+    print('Previous chat history cleared. Saved creature memories were kept.', flush=True)
+
+
 def ensure_installed(root, bridge, *, window=True):
     """Install a missing bridge, never overwrite a damaged/unrecognized install."""
     report = inspect_install(root)
@@ -164,8 +177,7 @@ def ensure_installed(root, bridge, *, window=True):
         from .install import update
         print('Mod bridge is missing. Installing it now...', flush=True)
         update(root, bridge)
-        check_installed(root)
-        print('Bridge installed and verified.', flush=True)
+        finish_install(root)
         if window:
             show_install_success(continuing=True)
     else:
@@ -233,7 +245,7 @@ def main(argv=None):
                         raise ValueError('Compiled bridge not found. Run Setup-Mod.cmd first, then retry --install.')
                     from .install import update
                     update(root, args.bridge)
-                    print('Bridge installed and verified.', flush=True)
+                    finish_install(root)
                     if not args.no_window:
                         show_install_success()
                 return 0
@@ -244,10 +256,20 @@ def main(argv=None):
             from .debug_session import DebugSession
             debug_session = DebugSession(args.debug, args.port or 0)
             game_launcher = None if args.no_window else GameLauncher(root)
+            automatic = not args.no_ticks
+
+            def apply_settings(updated):
+                nonlocal settings, automatic
+                prepare_provider(updated, config_path, dummy=args.dummy)
+                if debug_session.runtime is not None:
+                    automatic = debug_session.runtime.automatic
+                settings = updated
+
             asyncio.run(run_managed(lambda emit: play(root, settings, config_path, dummy=args.dummy, actions=args.actions,
-                             debug=args.debug, overlay=not args.no_overlay, automatic=not args.no_ticks,
+                             debug=args.debug, overlay=not args.no_overlay, automatic=automatic,
                              port=args.port or 0, emit=emit, debug_session=debug_session), config_path, window=not args.no_window,
-                             game_launcher=game_launcher, debug_session=debug_session))
+                             game_launcher=game_launcher, debug_session=debug_session,
+                             apply_settings=apply_settings))
         return 0
     except KeyboardInterrupt:
         return 0

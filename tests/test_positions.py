@@ -37,7 +37,7 @@ class PositionTests(unittest.TestCase):
         definitions={d['name']:d for d in tools.definitions()}
         self.assertIn('move_to',definitions)
         self.assertNotIn('move_to_position',definitions)
-        self.assertTrue(any('x' in d['properties'] for d in definitions['move_to']['parameters']['properties']['destination']['anyOf']))
+        self.assertTrue(any('x' in d.get('properties',{}) for d in definitions['move_to']['parameters']['properties']['target']['anyOf']))
         result=tools.call('move_to',{'destination':{'x':350.25,'z':280}})
         self.assertFalse(result['executed']);self.assertFalse(h.sent)
         self.assertEqual(tools.call('move_to',{'destination':{'x':450,'z':280}})['status'],'action_already_selected')

@@ -79,6 +79,24 @@ def model_objects(value, *, context=None, creature_body=False):
     return result
 
 
+def group_self(value):
+    """Consistent self groups for both summaries and detailed inspection."""
+    result = deepcopy(value)
+    if not isinstance(result, dict): return result
+    body = dict(result.get('body') or {})
+    for key in ('damage', 'hunger', 'tiredness', 'dehydration', 'warmth', 'fatness',
+                'itchiness', 'strength', 'on_fire'):
+        if key in result: body[key] = result.pop(key)
+    if body: result['body'] = body
+    motivations = dict(result.get('motivations') or {})
+    if 'hunger_motivation' in result:
+        motivations['hunger_motivation'] = result.pop('hunger_motivation')
+    if motivations: result['motivations'] = motivations
+    if 'miracles' in result:
+        result['learning'] = {**result.pop('miracles'), **result.get('learning', {})}
+    return result
+
+
 def model_turn(value):
     """Transport timestamps and planner flags are diagnostic data, not context."""
     result = deepcopy(value)
@@ -100,7 +118,10 @@ def model_turn(value):
             result['snapshot'].setdefault('god_hand', {})['alignment'] = world.pop('god_alignment')
             if not world:
                 result['snapshot'].pop('world')
-    return model_objects(result)
+    result = model_objects(result)
+    if isinstance(result, dict) and isinstance(result.get('snapshot'), dict) and 'self' in result['snapshot']:
+        result['snapshot']['self'] = group_self(result['snapshot']['self'])
+    return result
 
 
 def model_snapshot(snapshot):

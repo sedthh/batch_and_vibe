@@ -97,8 +97,10 @@ def _material(request, summary, *, settings=None) -> CreaturePrompt:
     context.update(island_updates(request.island))
     if request.environment.time_of_day:
         context['world'] = {'time_of_day': request.environment.time_of_day}
-    if request.environment.weather_near_creature:
-        context.setdefault('world', {})['weather_near_creature'] = request.environment.weather_near_creature
+    from .environment import weather_context
+    weather = weather_context(request.environment.weather_near_creature, request.environment.snow_on_ground)
+    if weather:
+        context.setdefault('world', {})['weather_near_creature'] = weather
     creature = request.creature
     system = with_profile_names(build_system(settings), creature.names)
     system = with_island_roster(system, request.island)
@@ -176,7 +178,7 @@ def _material(request, summary, *, settings=None) -> CreaturePrompt:
     holding = request.holding
     if holding.holding is True:
         from .held_objects import HELD_LABELS
-        name = ('a '+holding.object_type if holding.object_type else
+        name = ('a '+holding.object_type.replace('_', ' ') if holding.object_type else
                 HELD_LABELS.get(holding.kind, 'an unidentified object'))
         happening.append(f'You are holding {name}.')
         context['held_object'] = {'kind':holding.kind or 'object'}

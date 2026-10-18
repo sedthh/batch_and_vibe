@@ -64,7 +64,7 @@ def main() -> None:
         actual=subprocess.check_output([str(signature_test),str(fixture)],text=True,
             creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0)).strip()
         assert actual==expected,(name,actual,expected)
-    for name in ("action_probe_policy", "command_priority", "catalog_refresh", "reader_activity", "type_name_cache", "object_type_view", "object_hierarchy", "activity_guard", "movement_guard", "movement_pace", "object_movement_guard", "action_catalog", "held_action_guard", "held_miracle", "throw_targets", "target_pool", "miracle_actions", "world_actions", "individual_gesture", "pickup_completion", "pickup_eligibility", "snapshot_payload"):
+    for name in ("action_probe_policy", "command_priority", "thinking_pause", "teleport_travel", "fishing_delivery", "mushroom_effect", "catalog_refresh", "reader_activity", "type_name_cache", "object_type_view", "object_hierarchy", "activity_guard", "movement_guard", "movement_pace", "object_movement_guard", "action_catalog", "held_action_guard", "held_miracle", "throw_targets", "target_pool", "miracle_actions", "world_actions", "individual_gesture", "pickup_completion", "pickup_eligibility", "snapshot_payload"):
         executable = lab / f"{name}.exe"
         subprocess.run(compiler + ["-std=c++17", str(ROOT / f"tests/native/{name}.cpp"),
                                   "-o", str(executable)], check=True, env=env)

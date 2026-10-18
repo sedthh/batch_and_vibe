@@ -47,6 +47,11 @@ class PromptAssemblyTests(unittest.IsolatedAsyncioTestCase):
                         self.assertNotIn('## Reply format', text)
                         self.assertNotIn('## Action selection', text)
                         self.assertNotIn('conversation_only requires', text)
+                        self.assertNotIn('move_to(destination=', text)
+                        self.assertNotIn('inspect_surrounding', text)
+                        self.assertNotIn('cast_held_miracle', text)
+                        self.assertIn('move_to(target="god_hand")', text)
+                        self.assertIn('move_to(target="player_temple"', text)
                         for section in (ACTION_FEEDBACK_GUIDANCE, SPEECH_GUIDANCE,
                                         SESSION_GREETING_GUIDANCE, CONTEXT_CONTRACT, HOME_GUIDANCE):
                             self.assertEqual(text.count(section), 1)

@@ -10,13 +10,19 @@ WORLD_ACTIONS = {
     'move_to':'Approach a selected known object using native pathfinding. Does not pick it up or interact with it. Walking/running speed and stopping distance are engine controlled; plan ending alone does not prove arrival.',
     'sit_down':'Sit down using native behavior.',
     'look_at_player':'Look toward the player camera.',
-    'howl':'Play the native body howl animation if this creature has it. Not yet visually verified.',
-    'laugh':'Play the native whole-body laugh animation if this creature has it. Not yet visually verified.',
-    'cry':'Play the native body crying animation if this creature has it. Not yet visually verified.',
-    'show_realization':'Play the native body aha/realization animation if this creature has it. Not yet visually verified.',
-    'pray':'Play the native body prayer animation if this creature has it. Not yet visually verified.',
+    'howl':'Play the native body howl animation if this creature has it.',
+    'laugh':'Play the native whole-body laugh animation if this creature has it.',
+    'cry':'Play the native body crying animation if this creature has it.',
+    'show_realization':'Play the native body aha/realization animation if this creature has it.',
+    'pray':'Play the native body prayer animation if this creature has it.',
     'dance_with_villagers':'Approach a villager and start the native group dance. The engine recruits participants and finds space; a started plan does not confirm participation.',
-    'fish':'Attempt fishing and eating at the fishing spot the engine finds nearest to you. Target is self, not a fishing-area ID. To fish elsewhere, move there first. Fish availability and success are engine controlled.',
+    'fish':'Catch and eat fish at the nearest fishing spot. Target is self. Fish availability and success are engine controlled.',
+    'fish_to_hand':'Catch fish, carry them to the god hand ground position selected when execution starts, and put them down there. Does not eat the catch. The native routine finds the nearest fishing spot.',
+    'fish_home':'Catch fish, carry them home and put them down using the native delivery routine. Does not eat the catch.',
+    'fish_to_storage':'Catch fish and deliver them to the selected village storage using the native routine. Does not eat the catch.',
+    'fish_to_worship':'Catch fish and leave them beside the selected worship site using the native routine. Does not eat the catch.',
+    'drink':'Find a natural-water point, approach it and try to drink using native behavior. Target is self; the engine chooses the water, not an object ID. Move near the desired river, pond or shore first to drink in that area. Water miracles are not drinking water. A started or ended plan alone does not confirm drinking or quenching thirst.',
+    'use_teleport':'Travel through existing same-island teleport gates. Target is the destination/EXIT gate object_id; the bridge chooses the nearest other entrance in the same player network and the native creature walks there and attempts travel. Requires at least two live gates. Does not cast a miracle or enter an island vortex. Plan end alone does not confirm crossing; a gate may expire or be unreachable.',
     'eat_from_storage':'Approach a village store and eat from it using the native food-fetching routine. Food availability and outcome remain engine controlled.',
     'eat_from_field':'Approach a field and attempt to gather and eat its food. An unripe or empty field may provide nothing.',
     'eat_from_tree':'Approach a tree and attempt the native tree-eating routine. Does not guarantee edible food or successful eating.',
@@ -64,7 +70,7 @@ NEARBY_TARGET_DISTANCE=360
 KNOWN_TARGET_DISTANCE=20000
 WORLD_KINDS=('self','tree','rock','villager','house','creature','temple','toy','food_pile','wood_pile','animal','miracle_bubble','field','miracle_dispenser','fishing_area','animal_group')
 WORLD_KINDS += ('storage','nursery','cemetery','workshop','wonder','town_centre','totem','windmill','worship_site','fence','mushroom','bonfire','scaffolding')
-WORLD_KINDS += ('object',)
+WORLD_KINDS += ('object','teleport')
 
 
 def valid_target_metadata(entry):
@@ -121,9 +127,12 @@ def world_offers_available(probe, *, planning=False):
                 homes.add(entry['action'])
         if not valid_target_metadata(entry):return ()
         seen.add(token)
-        # Older bridges advertised a fishing-area target that FishAndEat ignores.
-        # Omit that offer rather than silently fishing somewhere else.
-        if entry['action']=='fish' and entry['kind']!='self':continue
+        # These recipes choose their own destinations. Never bind an object
+        # target that the native constructor would silently ignore.
+        if entry['action'] in ('fish','fish_to_hand','fish_home','drink') and entry['kind']!='self':continue
+        if entry['action']=='fish_to_storage' and entry['kind']!='storage':continue
+        if entry['action']=='fish_to_worship' and entry['kind']!='worship_site':continue
+        if entry['action']=='use_teleport' and entry['kind']!='teleport':continue
         if entry['action'] in HELD_MIRACLE_ACTIONS:
             if (held_miracle is None or type(entry.get('held_generation')) is not int
                     or type(entry.get('held_spell')) is not int

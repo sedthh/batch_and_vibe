@@ -3,7 +3,7 @@ from copy import deepcopy
 import json
 import re
 from .held_objects import HELD_KINDS
-from .action_probe import PICKUP_KINDS
+from .action_probe import PICKUP_KINDS, HELD_ACTIONS
 from .world_actions import WORLD_ACTIONS, WORLD_KINDS, OBJECT_TARGET_LIMIT, KNOWN_TARGET_LIMIT, NEARBY_TARGET_DISTANCE
 from .object_aliases import kind_matches, target_matches, OBJECT_ALIAS_CONTRACT
 from .object_details import public_object, known_objects, lookup_order
@@ -13,10 +13,13 @@ The generated Tool reference lists the actual offered schemas and descriptions.
 If no tools are supplied, do not invent a call or claim to have used one.
 You may inspect, select ONE physical action, update memory and give optional speech
 within the configured call budget. Stop inspecting once you can decide. All action
-tools and gesture cues share that one-action limit. Memory and inspection are not
-physical actions. Select the final action directly; the host handles necessary
+tools and gesture cues share that one-action limit. Inspecting your held object
+also selects its examination animation when available and no action is already
+selected. Other inspection and memory operations are not physical actions.
+Select the final action directly; the host handles necessary
 put-down preparation. Return decision candidate=null; the host transfers your
-tool selection. Do not combine a physical action with an emoji gesture.
+tool selection. Do not combine a physical action with an emoji gesture, except
+that a held-item cue may choose the gesture for that same held-item inspection.
 
 ## Targets and inspection
 
@@ -36,10 +39,17 @@ not required for an object you already know. A returned target_id also works for
 that request and action, but is temporary; never store it in memory. Object IDs
 are stable identities only while tracked in the same game session, not proof of
 continued existence. Save the description alongside an ID and search again if it
-is stale. Search and inspection never execute actions.
-inspect_surrounding pages through the 360-unit inspection area; ticks summarize
-120 units. Follow next_offset for more; offset=0 refreshes the page list.
-find_objects pages through known objects independently of action compatibility.
+is stale. Search is read-only. Inspecting your own held item can select examination
+as described below; other object inspection is read-only.
+find_objects pages through objects independently of action compatibility:
+scope=nearby covers 360 units, known includes near and far, distant excludes nearby.
+Ticks summarize 120 units. detail=brief gives IDs and essential observations;
+detailed adds object details and linked towns. Follow next_offset for more;
+offset=0 refreshes the page list. inspect_object takes object_ids (one or more)
+and optional sections; null sections returns all available detail. Use town_needs
+to compare village demands, ownership for god links, physical_traits for creature
+bodies, person for villager roles/activity, details for resources/construction,
+belief for town belief, and miracles for a bubble's spell.
 find_targets finds action-compatible objects for a goal: action=eat, type=null
 or food_source considers all available food sources, not only piles.
 find_targets also accepts offset; follow next_offset when more candidates remain.
@@ -54,13 +64,53 @@ not a census of the whole island.
 center=god_hand changes the search origin, not who acts. distance is
 from you; distance_to_god_hand is from the hand. Far objects may have
 fewer details. Absence from a list is not proof of absence, visibility or reachability.
-inspect_object can describe a player-held object's ID from god_hand.held_object.
-It also accepts activity.leash.target.object_id for the object your leash is
+inspect_object(object_ids=[ID], sections=null) can describe a player-held object from god_hand.held_object.
+Your empty hand says nothing about objects beside God or held by God. For an
+object under/near the player's hand, check god_hand.held_object and search with
+find_objects(type=the requested type, center="god_hand", scope="nearby"). A toy
+may be near God even when none are near you. Inspect the returned object before
+denying it exists or substituting an earlier object from the conversation.
+object_ids also accepts activity.leash.target.object_id for the object your leash is
 attached to; extra details depend on current observation of that object.
 use_held_object always uses your own hand, never the player's hand or activated spell.
+use_held_object(action="examine", target=null) returns the held item's available
+details and selects its native examination behavior in one call. Conversely,
+inspect_object on your own held item's ID returns details and selects the same
+examination when available. Only when you hold something, it randomly chooses
+examine, shake or smell, never stroke. A held-item emoji in the final speech
+chooses its matching gesture instead; no second call or animation is needed.
+Stroking requires the explicit stroke cue. It shares the one-action
+limit: an existing selected action is kept, with examination skipped. World and
+player-held object inspection and general inspect_self remain read-only.
+Details are current observations, not proof that the animation played. Native
+examination does not guarantee retaining the object afterward.
+use_held_object(action="bring_home", target=null) carries what you already hold
+to your native home and releases it there as one action. The bridge chooses the
+native food, toy or general-object routine. No separate move or put_down call
+is needed. Home comes from the engine, not a guessed temple-centre coordinate;
+this is not delivery to a village store. Selection is not confirmed delivery.
+do_action(action="fish", target=destination) finds the nearest fishing spot,
+catches fish and handles the chosen destination in one native sequence:
+"self" catches and eats; "god_hand" brings the catch to the hand's ground
+position when execution starts and puts it down; "player_temple" takes it home.
+A storage or worship-site object_id delivers the catch there. Delivery keeps
+the fish instead of eating them. For "bring me fish", choose "god_hand".
+The destination is not the fishing spot; move near a different fishing area
+first if needed. A selected or ended plan alone does not prove a successful catch.
 Search farther before denying a nearby request. In speech say "I can't find one
 nearby", never refer to samples, IDs or lookup internals. Canonical returned names
 may differ from synonyms: warehouse is storage, cattle may be cow.
+All physical tools use target for an object ID or a named special target.
+move_to(target="god_hand") follows the live hand; move_to(target="player_temple")
+approaches the home temple. Only move_to accepts target={"x":X,"z":Z}.
+do_action(action="use_teleport", target=exit_gate_id) attempts travel to that
+existing Teleport gate using the nearest other entrance in its network. Choose
+the EXIT, not the gate beside you. find_objects(type="teleport") and inspection
+show gates and connected exit IDs. Requires another live gate; ordinary move_to
+only approaches. This does not cast Teleport or enter an island vortex.
+use_held_object uses target=null for actions on the item already held.
+For held-bubble destinations use find_targets(action="cast_miracle", source="held",
+miracle=null); for learned spells use source="world" and the spell name.
 Prefer object IDs to object coordinates. Coordinates are fixed ground locations;
 do not guess them. Come here/come to me means the live god_hand. Movement only
 approaches, without picking up or interacting. Nonphysical group/temple containers
@@ -163,11 +213,11 @@ CATALOG={s['name']:s for s in (
             'center':{'type':['string','null'],'enum':[None,'creature','god_hand'],'maxLength':16}}),
     schema('search_actions','Find executable actions for a goal, including arguments, prerequisites and availability. No match means unavailable.',
            {'query':{'type':'string','minLength':1,'maxLength':160}}),
-    schema('update_memory','Save a new memory with null memory_id, or replace one existing memory by ID. Never changes native behavior.',
+    schema('update_memory','Save or correct a persistent memory. For a correction, refinement or changed preference, replace the relevant existing entry using its ID from Creature memory in the system prompt. Do not append a second version. Use null memory_id only for an independent new memory. Never changes native behavior.',
            {'memory':{'type':'string','minLength':1,'maxLength':2000,
                       'description':'Concise memory to keep: a supported lesson, preference, goal or useful place.'},
             'memory_id':{'type':['string','null'],'minLength':1,'maxLength':64,
-                         'description':'Existing memory ID to replace; null adds a new memory.'}}),
+                         'description':'Use the existing entry ID for corrections or refinements. Null adds an independent new memory, not another version of an existing one.'}}),
     schema('forget_memory','Delete exactly one saved memory by its current memory ID. Does not erase conversation history.',
            {'memory_id':{'type':'string','minLength':1,'maxLength':64}}),
 )}
@@ -218,11 +268,17 @@ for _name,_description,_keywords in (
 for _name in ('wave','dance'):
     ACTION_CATALOG[_name]['validation']='visually confirmed through direct dummy dispatch'
 
-HELD_ACTION_NAMES = ('put_down','eat_held','discard_held')
+HELD_ACTION_NAMES = HELD_ACTIONS
 for _name,_description,_keywords in (
     ('put_down','Put the offered held object down nearby using native behavior. Does not throw it.','put down drop release held holding hand object tree rock food'),
     ('eat_held','Try to eat the held object the engine allows you to eat. Empty hands alone do not prove eating.','eat consume hungry hunger food grain mushroom villager animal held holding hand'),
     ('discard_held','Toss the held object away with the native discard motion, without choosing a destination. Direction and landing are engine controlled.','discard throw away toss aside shrug behind release held hand'),
+    ('bring_home','Carry the currently held object to your native home and release it there. The bridge selects the food, toy or general-object routine. A started or ended plan does not prove delivery.','bring carry take home held hand food toy object'),
+    ('examine_held','Examine the object already in your hand through native behavior. The public held-object tool returns its available details in the same call; this uses the physical action slot and does not guarantee retaining the object afterward.','examine investigate study curious curiosity inspect held holding hand object'),
+    ('look_at_held','Look closely at the item already in your hand. This explicit cue selects examine rather than a random gesture.','look examine inspect held hand'),
+    ('shake_held','Raise the item already in your hand to your ear and shake it.','shake listen ear held hand'),
+    ('smell_held','Sniff the item already in your hand.','smell sniff nose held hand'),
+    ('stroke_held','Gently stroke the item already in your hand. Never chosen by random examination.','stroke pet held hand'),
 ):
     ACTION_CATALOG[_name]={'description':_description,'keywords':_keywords,
         'prerequisites':'Requires the held-action build and the same offered object still in your hand. Eating requires the engine to report the object edible.',
@@ -256,7 +312,8 @@ for _name,_description in WORLD_ACTIONS.items():
             'kick hit damage building house' if _name=='attack' else
             'poop poo defecate toilet rock building' if _name=='poo_on' else
             'vomit puke sick throw up retch nausea' if _name=='vomit' else
-            'fish fishing eat food fishing_area' if _name=='fish' else 'gesture expression'),
+            'drink drinking thirst thirsty natural water river pond lake sea shore' if _name=='drink' else
+            'fish fishing catch carry deliver food fishing_area' if _name.startswith('fish') else 'gesture expression'),
         'prerequisites':'Select an explicitly offered target ID. The bridge checks current recipe, object and learning; partial learning can fail.',
         'validation':'implemented; live validation pending'}
 
@@ -451,39 +508,11 @@ class CreatureToolSession:
             bubble=held_miracle_context((frame.get('diagnostics') or {}).get('action_probe') or {})
             if bubble:result['held_object']={'kind':'miracle_bubble','miracle':bubble}
         elif name in ('inspect_object','find_objects'):
-            objects=known_objects(raw.get('surroundings') or {})
             if name=='inspect_object':
-                held=raw.get('holding') or {}
-                if held.get('holding') and held.get('object_id')==arguments['object_id']:
-                    objects=[held,*objects]
-                from .god_hand import hand_contents
-                god_held=hand_contents(raw.get('god_hand')).get('held_object')
-                if god_held and god_held.get('object_id')==arguments['object_id']:
-                    objects=[god_held,*objects]
-                obj=next((o for o in objects if o.get('object_id')==arguments['object_id']),None)
-                if obj is None:
-                    leash=raw.get('leash') or {}
-                    if (leash.get('active') is True and leash.get('attachment')=='object'
-                            and leash.get('target_id')==arguments['object_id']):
-                        obj={'object_id':leash['target_id'],'kind':leash.get('target_kind') or 'object'}
-                if obj is None:
-                    from .island import registered_creature
-                    obj=registered_creature(raw.get('island'),arguments['object_id'])
-                town_id=obj.get('town_id') if obj else arguments['object_id']
-                town=next((t for t in (raw.get('surroundings') or {}).get('towns',[])
-                           if t.get('town_id')==town_id),None)
-                from .island import inspect_god
-                god=inspect_god(raw.get('island'),arguments['object_id'])
-                result={'status':'observed' if obj or town or god else 'object_not_currently_known','executed':False}
-                if god:result['god']=god
-                if obj:result['object']=public_object(obj)
-                owner=inspect_god(raw.get('island'),obj.get('owner_god_id')) if obj else None
-                if owner:result['owner_god' if obj.get('owner_link')=='registered_creature' else 'engine_owner_god']=owner
-                if obj is god_held and god_held:result['held_by']='player_god'
-                if town:result['town']=deepcopy(town)
-                controller=inspect_god(raw.get('island'),town.get('controlling_god_id')) if town else None
-                if controller:result['controlling_god']=controller
+                from .object_inspection import InspectionView
+                result=InspectionView(frame).describe(arguments['object_id'])
             else:
+                objects=known_objects(raw.get('surroundings') or {})
                 center=arguments['center'] or 'creature'
                 distance='distance_to_god_hand_engine_units' if center=='god_hand' else 'distance_engine_units'
                 objects=[o for o in objects if target_matches(arguments['kind'],o)

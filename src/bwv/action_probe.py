@@ -43,9 +43,11 @@ def priority_state(state):
 ACTIONS = {'look_confused': 1, 'sleep_here': 2, 'approach_hand': 3, 'wake_up': 4, 'approach_object': 5}
 SELF_ACTIONS = ('sleep_here','wave','sneeze','shiver','scratch','show_hotness','dance')
 ACTIONS.update(dict(zip(SELF_ACTIONS[1:],range(6,12))))
-HELD_ACTIONS = ('put_down','eat_held','discard_held')
-# Keep wire IDs stable; retired examine_held used 13.
-ACTIONS.update(put_down=12, eat_held=14, discard_held=21)
+HELD_GESTURES = ('look_at_held','shake_held','smell_held','stroke_held')
+HELD_ACTIONS = ('put_down','eat_held','discard_held','bring_home','examine_held',*HELD_GESTURES)
+# Keep wire IDs stable; the earlier examination wire 13 remains retired.
+ACTIONS.update(put_down=12, eat_held=14, discard_held=21, bring_home=22, examine_held=23)
+ACTIONS.update(zip(HELD_GESTURES,range(24,28)))
 ACTIONS['throw_held_at']=15
 ACTIONS['pick_up']=16
 MIRACLE_ACTIONS=('cast_heal_self','cast_water_tree')
@@ -122,7 +124,10 @@ def held_actions_available(probe):
               else held['kind'] == 'food_pile')
     return tuple(action for action in HELD_ACTIONS
         if (action!='eat_held' or edible)
-        and (action!='discard_held' or held.get('discard_version')==1))
+        and (action!='discard_held' or held.get('discard_version')==1)
+        and (action!='examine_held' or held.get('examine_version')==1)
+        and (action not in HELD_GESTURES or held.get('held_gesture_version')==1)
+        and (action!='bring_home' or (held.get('bring_home_version')==1 and held.get('can_bring_home') is True)))
 
 
 def self_catalog_available(probe):
@@ -246,8 +251,8 @@ class NativeActionAdapter:
 
     def _identity(self, state):
         probe = state['action_probe']
-        # Native generation changes on creature replacement and every eligibility
-        # transition, even if the creature becomes eligible again before a reply.
+        # Native generation revokes consumed commands and actual control/identity
+        # changes. Action-list changes are checked only for the chosen action.
         if state.get('pid') != self.pid:
             raise ValueError('Action offer belongs to another process')
         return (self.pid, state['session'], probe['epoch'], probe['generation'])
@@ -541,6 +546,23 @@ def lookup_target(pid, object_handle, *, expected_session, expected_creature):
         if probe.get('lookup_observed_object')==object_handle:
             return probe
     raise ValueError('Object was not found in current native beliefs')
+
+
+def configure_cut_content(pid, enabled):
+    """Apply the launcher's feature setting; never submit a creature action."""
+    if type(enabled) is not bool:
+        raise ValueError('Re-enable cut content must be true or false')
+    state=snapshot(pid)
+    probe=state.get('action_probe') or {}
+    if (probe.get('cut_content',{}).get('protocol')!=13
+            or probe.get('supported') is not True or probe.get('transport_ready') is not True):
+        raise ValueError('The installed bridge cannot configure recovered content. Install the current mod build.')
+    if type(state.get('source_age_ms')) not in (int,float) or not 0<=state['source_age_ms']<=1500:
+        raise ValueError('Waiting for a fresh game reading to configure recovered content')
+    packet=COMMAND.pack(0x42575041,13,probe['epoch'],probe['generation'],
+                        probe['offered_at_uptime_ms'],0,int(enabled))
+    if not submit(pid,packet):
+        raise ValueError('Recovered-content setting was not accepted; the mod will retry')
 
 
 def submit(pid, packet):

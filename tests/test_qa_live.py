@@ -156,6 +156,90 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
         small['current']['speech'].clear()
         self.assertEqual(self.runtime.payload()['current']['speech'],full['current']['speech'])
 
+    async def test_turn_waits_if_fast_reading_expires_during_requested_detail_scan(self):
+        from unittest.mock import Mock
+        from bwv.creature_tools import ToolContextUnavailable
+        self.runtime.automatic=False
+        for interruption in (None, 'cutscene', 'creature'):
+            with self.subTest(interruption=interruption):
+                old=self.frame();self.runtime.ingest(old)
+                self.runtime.request_details=Mock(return_value=1)
+                session=self.runtime._tool_session()
+                task=asyncio.create_task(self.runtime._wait_for_turn_context())
+                await self.until(lambda:self.runtime.request_details.called)
+                epoch=self.runtime.broker._epoch
+                self.now+=2
+                self.runtime.ingest(old)
+                await asyncio.sleep(.08)
+                self.assertFalse(task.done())
+                self.assertEqual(self.runtime.broker._epoch,epoch)
+                self.assertFalse(self.runtime.gate.poll(self.now).allowed)
+                changes=({'cutscene':True} if interruption=='cutscene' else
+                         {'creature_id':'new-creature'} if interruption=='creature' else {})
+                frame=self.frame(**changes)
+                frame['diagnostics']['detailed_sensors']={'revision':1,'observed_at':self.now}
+                frame['observation']['experience']['body']['health']=.7
+                self.runtime.ingest(frame)
+                await asyncio.wait_for(task,1)
+                if interruption:
+                    with self.assertRaises(ToolContextUnavailable):await session.call_async('inspect_self',{})
+                else:
+                    result=await session.call_async('inspect_self',{})
+                    self.assertEqual(result['self']['body']['damage'],30)
+                self.runtime.request_details.assert_called_once()
+                self.assertEqual(self.runtime.broker.calls_started,0)
+
+    async def test_requested_detail_scan_that_never_returns_has_bounded_wait(self):
+        from unittest.mock import Mock
+        from bwv.creature_tools import ToolContextUnavailable
+        self.runtime.ingest(self.frame())
+        self.runtime.request_details=Mock(return_value=1)
+        self.runtime.gate.preserve_stale_seconds=.05
+        with self.assertRaises(ToolContextUnavailable):
+            await asyncio.wait_for(self.runtime._wait_for_turn_context(),1)
+        self.runtime.request_details.assert_called_once()
+        self.assertEqual(self.runtime.broker.calls_started,0)
+
+    async def test_tool_rounds_use_latest_view_without_repeated_detail_scans(self):
+        from unittest.mock import Mock
+        self.runtime.automatic=False
+        self.runtime.ingest(self.frame())
+        self.runtime.request_details=Mock(side_effect=AssertionError('Unexpected detail scan'))
+        session=self.runtime._tool_session()
+        for health in (.8,.7,.6):
+            self.now+=2
+            frame=self.frame()
+            frame['observation']['experience']['body']['health']=health
+            frame['diagnostics']['detailed_sensors']={'revision':1,'observed_at':100}
+            self.runtime.ingest(frame)
+            await session.validate_async()  # Before a provider round.
+            result=await session.call_async('inspect_self',{})
+            self.assertEqual(result['self']['body']['damage'],round(100*(1-health)))
+        self.runtime.request_details.assert_not_called()
+        self.assertEqual(self.runtime.broker.calls_started,0)
+
+    async def test_missing_recipient_reading_keeps_unsent_chat_retryable(self):
+        self.runtime.automatic=False
+        self.runtime.ingest(self.frame())
+        payload={'question':'say: Hello','expected_identity':['live-session','owned-monkey']}
+        self.runtime.ingest(None)
+        with self.assertRaises(ChatNotSubmitted) as rejected:
+            await self.runtime.question(payload)
+        self.assertTrue(rejected.exception.retryable)
+        self.assertEqual(rejected.exception.reason,'game_disconnected')
+        self.assertEqual(self.runtime.broker.calls_started,0)
+        self.runtime.ingest(self.frame())
+        result=await self.runtime.question(payload)
+        self.assertEqual(result['reply']['say'],'Hello')
+        self.assertEqual(self.runtime.broker.calls_started,1)
+        for changes in ({'session':'new-session'},{'creature_id':'new-creature'}):
+            self.runtime.ingest(self.frame(**changes))
+            with self.assertRaises(ChatNotSubmitted) as rejected:
+                await self.runtime.question(payload)
+            self.assertFalse(rejected.exception.retryable)
+            self.assertEqual(rejected.exception.reason,'recipient_changed')
+        self.assertEqual(self.runtime.broker.calls_started,1)
+
     async def test_delayed_frame_keeps_reply_identity_and_in_progress_question(self):
         self.runtime.automatic=False
         old=self.frame();self.runtime.ingest(old)
@@ -194,7 +278,7 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
             if interrupted:
                 with self.assertRaises(ToolContextUnavailable):await task
             else:
-                self.assertEqual((await task)['body']['damage'],30)
+                self.assertEqual((await task)['self']['body']['damage'],30)
 
     async def test_model_preview_matches_wire_names_without_changing_internal_context(self):
         self.runtime.automatic=False
@@ -202,7 +286,7 @@ class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
             'health':.8,'energy':.7,'exhaustion':.1},'surroundings':{'trees_nearby':3}}))
         await self.runtime.step()
         current=self.runtime.payload()['current']
-        self.assertEqual(current['model_context']['self'],{'damage':20,'hunger':30,'tiredness':10})
+        self.assertEqual(current['model_context']['self']['body'],{'damage':20,'hunger':30,'tiredness':10})
         self.assertEqual(current['model_context']['surroundings'],{'trees':3})
         self.assertEqual(current['prompt']['context']['self']['health_engine_units'],.8)
         self.assertEqual(current['prompt']['context']['surroundings'],{'trees_nearby':3})

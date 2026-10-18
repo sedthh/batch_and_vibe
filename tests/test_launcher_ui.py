@@ -17,7 +17,7 @@ from bwv.llm import LLMConfig
 def form(config):
     data = asdict(config)
     data.update(data.pop('cadence'))
-    return {k: '' if v is None else str(v) for k, v in data.items()}
+    return {k: v if isinstance(v,bool) else '' if v is None else str(v) for k, v in data.items()}
 
 
 class SettingsFormTests(unittest.TestCase):
@@ -56,7 +56,8 @@ class SettingsFormTests(unittest.TestCase):
         import tkinter as tk
         interpreter = tk.Tcl()
         config = LLMConfig('fixture-model', reasoning_effort='low')
-        values = {k: tk.StringVar(interpreter, value=v) for k, v in form(config).items()}
+        values = {k: (tk.BooleanVar if isinstance(v,bool) else tk.StringVar)(interpreter, value=v)
+                  for k, v in form(config).items()}
         key = tk.StringVar(interpreter, value='fixture-unsaved-key')
         apply_provider_preset(values, key, 'Claude (compatibility API)')
         self.assertEqual(key.get(), '')
@@ -74,6 +75,7 @@ class SettingsFormTests(unittest.TestCase):
             self.assertEqual(saved.base_url, 'https://api.anthropic.com/v1')
             self.assertEqual(saved.token_parameter, 'max_tokens')
             self.assertIsNone(saved.reasoning_effort)
+            self.assertTrue(saved.reenable_cut_content)
             self.assertIn('OPENAI_API_KEY=fixture-existing-key', env.read_text())
             self.assertIn('ANTHROPIC_API_KEY=fixture-claude-key', env.read_text())
             self.assertNotIn('fixture-claude-key', path.read_text())

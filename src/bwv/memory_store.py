@@ -10,6 +10,22 @@ def default_memory_path():
     return root / 'BlackAndWhiteGenAI' / 'creature-memory.json'
 
 
+def clear_installed_history():
+    """Clear the standard runtime histories after install, preserving every note.
+
+    Use exact owned files, not a recursive search through user data. The live
+    model, dummy preview and legacy observer each have separate stores.
+    """
+    legacy = default_memory_path()
+    paths = (legacy, legacy.parent / 'live-llm' / 'creature-memory.json',
+             legacy.parent / 'live-dummy' / 'dummy-memory.json')
+    failures = 0
+    for path in paths:
+        if not MemoryStore(path).clear_history():
+            failures += 1
+    return {'history_cleared': failures == 0, 'failed_stores': failures}
+
+
 class MemoryStore:
     MAX_BYTES = 512_000
 
@@ -18,7 +34,7 @@ class MemoryStore:
         self.error = None
         self.writable = True
 
-    def load(self):
+    def load(self, *, include_history=True):
         try:
             with self.path.open('rb') as stream:
                 raw = stream.read(self.MAX_BYTES + 1)
@@ -42,6 +58,11 @@ class MemoryStore:
                         or len({e['id'] for e in entries})!=len(entries)
                         or '\n\n'.join(e['text'] for e in entries)!=data['notes']):
                     raise ValueError('Invalid memory entries')
+            if not include_history:
+                # A prior build's exchange format may no longer be understood.
+                # Validate memories, then discard exchanges before checking
+                # their obsolete action/status fields.
+                data['recent_pairs'] = []
             for pair in data['recent_pairs']:
                 if (type(pair) is not dict or not {'input','answer','decision','action_status'} <= pair.keys()
                         or not pair.keys() <= {'input','answer','decision','action_status','say','action_request_id','action_target'}
@@ -75,6 +96,13 @@ class MemoryStore:
             self.error = 'load_failed_original_preserved'
             self.writable = False
             return None
+
+    def clear_history(self):
+        """Atomically retain notes/IDs verbatim, without runtime memory limits."""
+        data = self.load(include_history=False)
+        if data is not None:
+            self.save(data['notes'], [], data.get('entries'))
+        return self.error is None
 
     def save(self, notes, pairs, entries=None):
         if not self.writable:

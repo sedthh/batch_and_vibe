@@ -13,6 +13,24 @@ from ctypes import wintypes
 MAX_SNAPSHOT_BYTES=512*1024
 
 
+def _connect_snapshot(kernel, name, deadline):
+    """Wait/open share one deadline; availability does not reserve a pipe slot."""
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Bridge connection timed out")
+        if not kernel.WaitNamedPipeW(name, max(1, int(remaining * 1000))):
+            raise ctypes.WinError(ctypes.get_last_error())
+        handle = kernel.CreateFileW(name, 0x80000000, 0, None, 3, 0, None)
+        if handle != wintypes.HANDLE(-1).value:
+            return handle
+        error = ctypes.get_last_error()
+        if error != 231:  # ERROR_PIPE_BUSY: another reader took the available slot.
+            raise ctypes.WinError(error)
+        # Retry only this read-only connection, never an action or model call.
+        time.sleep(min(.01, max(0, deadline - time.monotonic())))
+
+
 def snapshot(pid: int, timeout_ms: int = 2000) -> dict:
     if os.name != "nt":
         raise OSError("The game bridge requires Windows")
@@ -24,6 +42,11 @@ def snapshot(pid: int, timeout_ms: int = 2000) -> dict:
     kernel = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel.WaitNamedPipeW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD]
     kernel.WaitNamedPipeW.restype = wintypes.BOOL
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
     kernel.GetTickCount64.argtypes = []
     kernel.GetTickCount64.restype = ctypes.c_ulonglong
     kernel.PeekNamedPipe.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
@@ -31,10 +54,14 @@ def snapshot(pid: int, timeout_ms: int = 2000) -> dict:
     kernel.PeekNamedPipe.restype = wintypes.BOOL
     deadline = time.monotonic() + timeout_ms / 1000
     name = rf"\\.\pipe\bwv-observer-{pid}"
-    if not kernel.WaitNamedPipeW(name, timeout_ms):
-        raise OSError(ctypes.get_last_error(), "Bridge unavailable; launch the instrumented game first")
+    handle = _connect_snapshot(kernel, name, deadline)
+    try:
+        descriptor = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
     # A connected server writes one bounded cached snapshot then disconnects.
-    with open(name, "rb", buffering=0) as stream:
+    with os.fdopen(descriptor, "rb", buffering=0) as stream:
         # This handle belongs exclusively to this invocation, with no outstanding
         # I/O. Peek before reading so a connected but silent server cannot hang us.
         handle = msvcrt.get_osfhandle(stream.fileno())

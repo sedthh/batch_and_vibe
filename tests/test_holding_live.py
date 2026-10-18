@@ -6,6 +6,7 @@ from unittest.mock import patch
 from bwv import holding_live as live
 from bwv.control import ControlObservation
 from bwv.holding import HoldingContext
+from bwv.held_objects import RUNTIME_HELD_DETAILS
 from bwv.training_live import PLAYER_CREATURE, HAND_TARGET
 from test_training_live import MemoryFixture
 
@@ -142,7 +143,7 @@ class HoldingReaderTests(TestCase):
             memory.bytes(0x5004208,name.ljust(64,b'\0'))
             self.assertEqual(memory.sample().context.kind,kind)
             self.assertTrue(memory.sample().context.holding)
-        for name,detail in live.RUNTIME_HELD_DETAILS.items():
+        for name,detail in RUNTIME_HELD_DETAILS.items():
             memory.bytes(0x5004208,name.ljust(64,b'\0'))
             self.assertEqual(memory.sample().context.object_type,detail)
         memory.put(memory.mental+live.MENTAL_PLAN+live.PLAN_ACTION,999)

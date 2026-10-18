@@ -35,7 +35,7 @@ class HeldMiracleTests(unittest.TestCase):
             self.assertIn('cast_miracle',menu['capabilities']['held_object_actions'])
             self.assertNotIn('miracle_attempts',menu['capabilities'])
             self.assertFalse(any(a in HELD_MIRACLE_ACTIONS for a in menu['capabilities'].get('actions',[])))
-            targets=s.call('find_targets',{'kind':None,'limit':3,'action':'cast_held_miracle'})['action_targets']
+            targets=s.call('find_targets',{'kind':None,'limit':3,'action':'cast_miracle','source':'held'})['action_targets']
             s.call('use_held_object',{'action':'cast_miracle','target':'self' if action.endswith('_self') else targets[0]['target_id']})
             offer.dispatch(s.finalize_reply({})['decision'])
             h.pending.advance(h.obs(),allowed=True);h.pending.advance(h.obs(),allowed=True)
@@ -89,7 +89,7 @@ class HeldMiracleTests(unittest.TestCase):
 
     def test_held_cast_cannot_select_a_different_spell(self):
         h=HeldMiracleHarness();_,s,_=h.session()
-        self.assertEqual(s._recipes('cast_held_miracle','fireball'),[])
+        self.assertEqual(s._recipes('cast_miracle','fireball','held'),[])
 
 
 if __name__=='__main__':unittest.main()

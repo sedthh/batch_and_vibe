@@ -93,7 +93,7 @@ class TreeProtocolTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(h.sent,[])
                 wires.append(json.loads(req.content))
                 if len(wires)==1:
-                    response=call(api,'inspect_surrounding',{'kind':None,'limit':10,'action':'move_to','miracle':None})
+                    response=call(api,'find_targets',{'kind':None,'limit':10,'action':'move_to','miracle':None, 'scope':'nearby'})
                 elif len(wires)==2:
                     target=re.findall(r'tree-[a-f0-9]{32}',req.content.decode())[-1]
                     response=call(api,'move_to',{'destination':{'target_id':target},'pace':None},'tree-choice')

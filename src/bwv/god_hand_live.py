@@ -4,8 +4,8 @@ import hashlib
 import time
 
 from .god_hand import GodHandContext
-from .held_objects import RUNTIME_HELD_KINDS, RUNTIME_HELD_DETAILS
-from .object_types import OBJECT_KINDS, object_kind
+from .held_objects import RUNTIME_HELD_KINDS
+from .object_types import OBJECT_KINDS, object_kind, object_subtype
 from .building_types import building_kind
 from .pipe import snapshot
 from .spells import SPELLS
@@ -71,7 +71,10 @@ def describe_object(reader, address, name, session, creature, tick):
     kind = kind or 'object'
     obj = {'object_id': hashlib.sha256(f'{session}:{creature}:{address}'.encode()).hexdigest()[:24],
            'kind': kind}
-    if name in RUNTIME_HELD_DETAILS:obj['object_type'] = RUNTIME_HELD_DETAILS[name]
+    try:
+        subtype = object_subtype(reader, address, name, lambda ptr: runtime_type(reader, ptr))
+        if subtype:obj['object_type'] = subtype
+    except (OSError, ValueError):errors += 1
     if name == b'.?AVOneOffSpellSeed@@':
         try:obj['miracle'] = read_spell(reader, address, name)
         except (OSError, ValueError):errors += 1

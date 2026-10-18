@@ -203,5 +203,5 @@ class GodHandProjectionTests(TestCase):
         result=s.call('inspect_self',{})
         self.assertEqual(result['god_hand']['held_object']['object_id'],'god-bubble')
         self.assertEqual(result['god_hand']['alignment'],.4)
-        self.assertEqual(result['holding_and_motivations']['object_id'],'creature-tree')
+        self.assertEqual(result['self']['held_object']['object_id'],'creature-tree')
         self.assertFalse(s.inner.selected_action)

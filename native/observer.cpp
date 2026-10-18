@@ -338,6 +338,9 @@ bool ensure() { return InitOnceExecuteOnce(&once, bootstrap, nullptr, nullptr) !
 extern "C" int __cdecl bwv_Version() { return ensure() ? version() : 0; }
 extern "C" int __cdecl bwv_Initialise(int context, void* table, ErrorCallback errors, Callback enter, Callback leave, int unknown, Callback stopped) {
     if (!ensure()) return 0;
+#ifdef BWV_ACTION_PROBE
+    bwv_probe::end_thinking_for_lifecycle();
+#endif
     ++epoch; ticks = 0;
     reset_observation();
     original_enter = enter; original_leave = leave;
@@ -369,24 +372,36 @@ extern "C" int __cdecl bwv_LookIn(int context, int flag) {
 }
 extern "C" int __cdecl bwv_LoadBinary(int context, const char* path) {
     if (!ensure()) return 0;
+#ifdef BWV_ACTION_PROBE
+    bwv_probe::end_thinking_for_lifecycle();
+#endif
     ++epoch; ticks = 0;
     reset_observation();
     return load_binary(context, path);
 }
 extern "C" int __cdecl bwv_RestoreState(int context, const char* path) {
     if (!ensure()) return 0;
+#ifdef BWV_ACTION_PROBE
+    bwv_probe::end_thinking_for_lifecycle();
+#endif
     ++epoch; ticks = 0;
     reset_observation();
     return restore_state(context, path);
 }
 extern "C" int __cdecl bwv_UnInitialise() {
     if (!ensure()) return 0;
+#ifdef BWV_ACTION_PROBE
+    bwv_probe::end_thinking_for_lifecycle();
+#endif
     initialized = false; ++epoch; native_names.clear();
     reset_observation();
     return uninitialize_vm();
 }
 extern "C" int __cdecl bwv_Reboot() {
     if (!ensure()) return 0;
+#ifdef BWV_ACTION_PROBE
+    bwv_probe::end_thinking_for_lifecycle();
+#endif
     ++epoch; ticks = 0;
     reset_observation();
     return reboot_vm();

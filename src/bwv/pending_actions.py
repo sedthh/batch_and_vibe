@@ -143,6 +143,8 @@ class PendingActions:
             target={'target_id':'held-'+uuid.uuid4().hex,'kind':held['kind'],'location':'in_creature_hand'}
             target['can_eat'] = 'eat_held' in held_candidates
             targets.update({action:deepcopy(target) for action in held_candidates})
+            if 'examine_held' in held_candidates:
+                targets['examine_held']['held_generation'] = held_token
             throwing=throw_targets_available(probe)
             if throwing or (probe.get('target_lookup_protocol')==12 and probe.get('throw_action',{}).get('verified') is True):
                 candidates.append('throw_held_at');destinations=[]
@@ -187,7 +189,7 @@ class PendingActions:
         target=item['result'].get('target',{})
         if token_key=='throw_token':target=target.get('destination',{})
         # An explicit home destination must never retry against another temple.
-        if target.get('player_temple'):return False
+        if target.get('player_temple') or item['candidate']=='use_teleport':return False
         kind=target.get('kind')
         if not kind or kind=='self' or item['retargets']>=2:return False
         item['tried_targets'].add(item.get(token_key))
@@ -310,6 +312,15 @@ class PendingActions:
             item['result'].pop('target',None)
 
     def advance(self, obs, *, allowed, temporary_unavailable=False):
+        # Preserve a thinking-turn takeover through wake/put-down waits and
+        # target recovery. This reads the existing feed, without another poll.
+        item = self.pending or (self.inflight[0] if self.inflight else None)
+        if item and item.get('control_revision') is not None:
+            probe = ((self.source() or {}).get('diagnostics') or {}).get('action_probe') or {}
+            revision = (probe.get('thinking_pause') or {}).get('control_revision')
+            if type(revision) is int and revision != item['control_revision']:
+                self.cancel('cancelled_control_changed')
+                return
         self._recover_rejection(obs, allowed)
         item = self.pending
         if item is None:
@@ -464,48 +475,32 @@ class PendingActions:
             self.pending = item
             self.last = {**item['result'], 'waiting_reason': 'native_offer_unavailable'}
             return
-        else:
-            if item['candidate'] not in offer['candidates']:
-                self.pending = item
-                self.last = {**item['result'], 'waiting_reason': 'native_offer_unavailable'}
-                return
-            if item['candidate'] in offer['candidates']:
-                try:
-                    current, _ = self._state(obs)
-                except (OSError, ValueError, TimeoutError, KeyError, TypeError) as error:
-                    self.pending = item
-                    self.last = {**item['result'],'waiting_reason':'source_recheck_unavailable',
-                                 'error_type':type(error).__name__}
-                    return
-                try:
-                    # A fresh offer may bind a different hand target; do not
-                    # silently reinterpret the player's delayed request.
-                    if (item['candidate'] == 'approach_object' and
-                            (current['action_probe'].get('object_movement', {}).get('target_generation') != item['object_token']
-                             or current['action_probe'].get('object_movement', {}).get('kind') != 'tree')):
-                        result = {'status': 'cancelled_target_changed', 'queued': False}
-                    elif (item['candidate'] == 'approach_hand' and
-                            current['action_probe']['conversation_actions'].get('hand_target_generation') != item['hand_token']):
-                        self.pending=item
-                        self.last={**item['result'],'waiting_reason':'refreshing_hand_target'}
+        if item['candidate'] not in offer['candidates']:
+            self.pending = item
+            self.last = {**item['result'], 'waiting_reason': 'native_offer_unavailable'}
+            return
+        try:
+            # The adapter validates this target against a fresh native reading,
+            # and the game thread checks it again at execution. Rechecking the
+            # older Python observation here adds no evidence and can reject a
+            # valid command just because that cached frame aged during capture.
+            if self.clock() >= item['expires']:
+                result = {'status': 'expired', 'queued': False}
+            else:
+                result = dispatcher.dispatch({'candidate': item['candidate']})
+                if retryable_before_execution(result):
+                    # No execution started: preserve the original deadline and
+                    # retry cap while acquiring a new selected-action offer.
+                    item['dispatch_retries'] += 1
+                    if item['dispatch_retries'] > 3:
+                        self.last = {**item['result'],'status':'cancelled_retry_limit','queued':False}
                         return
-                    elif self.clock() >= item['expires']:
-                        result = {'status': 'expired', 'queued': False}
-                    else:
-                        result = dispatcher.dispatch({'candidate': item['candidate']})
-                        if retryable_before_execution(result):
-                            # No execution started: capture a new offer while
-                            # preserving this intention's deadline and retry cap.
-                            item['dispatch_retries'] += 1
-                            if item['dispatch_retries'] > 3:
-                                self.last = {**item['result'],'status':'cancelled_retry_limit','queued':False}
-                                return
-                            self.pending = item
-                            self.last = {**item['result'], 'waiting_reason': result['status'], 'dispatch_check':result,
-                                         'retry_count':item['dispatch_retries']}
-                            return
-                except (OSError, ValueError, TimeoutError, KeyError, TypeError):
-                    result = {'status': 'not_confirmed_no_retry', 'queued': False}
+                    self.pending = item
+                    self.last = {**item['result'], 'waiting_reason': result['status'], 'dispatch_check':result,
+                                 'retry_count':item['dispatch_retries']}
+                    return
+        except (OSError, ValueError, TimeoutError, KeyError, TypeError):
+            result = {'status': 'not_confirmed_no_retry', 'queued': False}
         self.last = {**item['result'], **result}
         if result.get('queued') is True:
             baseline=probe.get('request_at_uptime_ms')
@@ -530,6 +525,10 @@ class _IntentionOffer:
         self.lookup = None
         self.lookup_cache = None
         self.player_command = False
+        self.control_revision = None
+
+    def bind_control_revision(self, revision):
+        self.control_revision = revision
 
     def mark_player_command(self):
         if self.offered or self.used:
@@ -703,6 +702,7 @@ class _IntentionOffer:
         if point:result['target']={'position':point}
         if resolution_note:result['target_resolution_note']=resolution_note
         owner.pending = {'identity': self.identity, 'candidate': candidate,
+                         'control_revision':self.control_revision,
                          'player_command':self.player_command,
                          'pace':pace,
                          'world_token':world_token, 'destination':point,

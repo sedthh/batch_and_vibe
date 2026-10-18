@@ -72,7 +72,7 @@ class TownNeedsTests(unittest.TestCase):
             self.assertEqual(set(result['town']['needs']),
                 {'food','wood','protection','mercy','homes','children'})
             self.assertFalse(result['executed'])
-        result=session.call('inspect_surrounding',{'kind':'warehouse','limit':3})
+        result=session.call('find_objects',{'kind':'warehouse','limit':3, 'scope':'nearby', 'detail':'detailed'})
         self.assertEqual(result['objects'][0]['type'],'storage')
         self.assertEqual(result['towns'][0]['needs'],town.needs)
 

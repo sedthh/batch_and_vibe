@@ -9,6 +9,31 @@ Command offer(const Policy& p) {
     return c;
 }
 int main() {
+    // Every supported command follows the same rule: current selected-action
+    // eligibility, target identity and control. Other menu changes do not revoke
+    // it, either before queueing or between queue and game-thread dispatch.
+    for(uint32_t action=1;action<=27;++action) {
+        if(action==13)continue; // retired wire ID
+        const bool held=action==12 || action==14 || action>=21;
+        const auto bit=1u<<(action-1),other=action==1?2u:1u;
+        Policy p(true,true,true);p.actions(bit|other);p.observe(1,42,true,"",100);
+        p.target_generation=p.object_target_generation=7;
+        p.held_target_generation=(held || action==15)?7:0;
+        p.throw_tokens[0]=p.pickup_tokens[0]=p.water_tokens[0]=p.world_tokens[0]=7;
+        auto c=offer(p);c.action=action;
+        c.version=held?6:action==15?7:action==16?8:action==17 || action==18?9:
+            action==19?10:action==20?11:action==4?3:action==5?4:
+            action==2 || (action>=6 && action<=11)?5:2;
+        c.version|=Command::interrupt_flag|Command::player_command_flag;
+        c.reserved=(held || action==3 || action==5 || action==15 || action==16 || action==18 || action==19)?7:0;
+        p.actions(bit);
+        assert(p.generation==c.generation);
+        p.actions(0);assert(!p.queue(c,110)); // Selected action unavailable now.
+        p.actions(bit); // Ordinary availability can return without a new command.
+        assert(p.queue(c,120));
+        p.actions(bit|other);
+        assert(p.dispatch(c,130));assert(!p.queue(c,140));
+    }
     // A verified group dance can outlive one minute without a false timeout.
     assert(!action_monitor_timed_out(309,true,309,60001,60000));
     assert(!action_monitor_timed_out(309,true,309,3600000,60000));
@@ -31,7 +56,7 @@ int main() {
         Policy p(true,true,true);p.actions(4u);p.observe(1,42,true,"",100);
         p.target_generation=7;
         auto c=offer(p);c.action=3;c.version=2|Command::interrupt_flag;c.reserved=7;
-        if(change==0){p.actions(0);p.actions(4u);} // Hand capability was revoked.
+        if(change==0)p.actions(0); // Hand unavailable at execution.
         if(change==1){p.observe(1,42,false,"menu",110);p.observe(1,42,true,"",120);}
         if(change==2)p.observe(2,42,true,"",120);
         if(change==3)p.observe(1,43,true,"",120);
@@ -79,7 +104,7 @@ int main() {
         Policy bound(true,true,true);
         bound.actions(1u<<18);bound.observe(1,42,true,"",100);bound.world_tokens[0]=55;
         auto c=offer(bound);c.action=19;c.version=10;c.reserved=55;
-        if(revoke==0) {bound.actions(0);bound.actions(1u<<18);}
+        if(revoke==0) bound.actions(0);
         if(revoke==1) {bound.observe(1,42,false,"menu",110);bound.observe(1,42,true,"",120);}
         if(revoke==2) {bound.observe(1,43,true,"",110);bound.observe(1,42,true,"",120);}
         assert(!bound.queue(c,130));

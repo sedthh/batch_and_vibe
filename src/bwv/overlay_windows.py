@@ -16,7 +16,7 @@ import sys
 import threading
 import time
 
-from .overlay import OverlayModel, ChatSubmission, overlay_bounds
+from .overlay import OverlayModel, ChatSubmission, ReplyReveal, overlay_bounds
 from .errors import ChatNotSubmitted
 
 
@@ -143,6 +143,7 @@ class OverlayWindow:
         self.restore_input_focus=False
         self.hotkey=False;self.hotkey_failed=False;self.geometry=None
         self._content_state=None;self._visible=False
+        self.reply_reveal=ReplyReveal();self._message_key=None
         self.deadline=time.monotonic()+seconds
         self.diagnostics_file=Path(diagnostics_file) if diagnostics_file else None
         self.last_diagnostic=None;self.target_identity=None
@@ -287,28 +288,33 @@ class OverlayWindow:
                 self.win.u.SetForegroundWindow(self.game)
             self.diagnostics(False)
             return
-        speech=self.model.banner_text(pending=self.pending,notice=self.notice)
+        now=time.monotonic()
+        speech=self.model.banner_text(pending=self.pending,notice=self.notice,now=now)
         submission=getattr(self,'submission',None)
         if submission is not None and not submission.sending:
-            speech=submission.notice(time.monotonic())
+            speech=submission.notice(now)
+        reply=self.model.visible_speech(now)
+        message_key=None
+        status_banner=(speech.startswith('[ERROR:') or
+            (speech.startswith('[') and speech.endswith(' is obeying your command]')))
+        if speech and speech==reply and not status_banner:
+            message_key=(self.model.identity,self.model.message_time)
+            speech=self.reply_reveal.reveal(speech,message_key,now)
+        elif not reply:
+            self.reply_reveal.clear()
         title=self.model.chat_title+' · Ctrl+Enter'
         if self.model.is_dummy:
             title += ' · Dummy'
         if self.hotkey_failed:title='Ctrl+Enter is already in use'
         indicator=self.model.call_indicator(pending=self.pending)
         button_text='Waiting…' if submission is not None and not submission.sending else 'Send'
-        content=(title,indicator,speech,self.expanded,self.pending,bool(self.model.identity),button_text)
+        content=(title,indicator,bool(speech),self.expanded,self.pending,bool(self.model.identity),button_text)
         # Tk configure/pack calls invalidate the layered window even when their
         # values are unchanged. Poll availability promptly without repainting
         # the overlay over the game's render surface on every timer tick.
         if content!=getattr(self,'_content_state',None):
             self.heading.configure(text=title)
             self.indicator.configure(text=indicator,fg='#58d878')
-            if speech!=self.message_text:
-                self.message.configure(state='normal');self.message.delete('1.0','end')
-                self.message.insert('1.0',speech);self.message.configure(state='disabled')
-                self.message.yview_moveto(0)
-                self.message_text=speech
             if speech:
                 self.message_box.pack(fill='both',expand=True,padx=8,pady=(0,2))
             else:self.message_box.pack_forget()
@@ -323,6 +329,20 @@ class OverlayWindow:
             self.send.configure(state='normal' if self.model.identity and not self.pending else 'disabled')
             self.send.configure(text=button_text)
             self._content_state=content
+        if speech!=self.message_text:
+            append=bool(message_key is not None and message_key==self._message_key
+                and self.message_text and speech.startswith(self.message_text))
+            follow=append and self.message.yview()[1]>=.999
+            self.message.configure(state='normal')
+            if append:
+                self.message.insert('end-1c',speech[len(self.message_text):])
+            else:
+                self.message.delete('1.0','end');self.message.insert('1.0',speech)
+            self.message.configure(state='disabled')
+            if not append:self.message.yview_moveto(0)
+            elif follow:self.message.see('end')
+            self.message_text=speech
+        self._message_key=message_key
         rect=self.win.rect(self.game) if self.game else None
         # Add exactly the input form's requested height (including its padding)
         # so opening it does not steal a pixel from the reply/scrollbar viewport.

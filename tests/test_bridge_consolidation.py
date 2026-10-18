@@ -98,7 +98,7 @@ class ConsolidationTests(unittest.TestCase):
             self.assertIn('### '+definition['name'],doc)
             self.assertIn(definition['description'],doc)
         changed=deepcopy(definitions)
-        inspect=next(d for d in changed if d['name']=='inspect_surrounding')
+        inspect=next(d for d in changed if d['name']=='find_objects')
         inspect['parameters']['properties']['limit']['maximum']=7
         self.assertIn('<=7',tool_documentation(changed))
         projected=session.project_request(replace(request,messages=({'role':'system','content':'Synthetic game.'},)))

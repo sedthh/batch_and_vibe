@@ -46,8 +46,10 @@ class ToolInterfaceTests(unittest.TestCase):
         h=WorldHarness()
         entry=next(t for t in h.probe['world_actions']['offers'] if t['action']=='fish')
         entry.update(kind='fishing_area',distance_engine_units=20)
-        session,_,_=bound(h)
-        self.assertNotIn('fish',session.menu)
+        session,_,request=bound(h)
+        self.assertNotIn('fish',session.actions)
+        self.assertIn('fish',session.menu)  # Other valid fishing destinations remain available.
+        self.assertNotIn('self',session.project_request(request).current['capabilities']['fishing_destinations'])
         self.assertIn('attack',session.menu)
         self.assertIn('fish uses target=self',next(d['description'] for d in session.definitions() if d['name']=='do_action'))
 
@@ -94,21 +96,21 @@ class ToolInterfaceTests(unittest.TestCase):
         near['nearby_known_objects']=original
         session,_,_=bound(WorldHarness(),source)
         args={'kind':None,'limit':10,'offset':0}
-        first=session.call('inspect_surrounding',args)
+        first=session.call('find_objects',{**args, 'scope':'nearby', 'detail':'detailed'})
         self.assertEqual(first['objects'][0]['type'],'miracle bubble')
         self.assertEqual(first['next_offset'],10)
         # Later movement/destruction must not reorder unvisited pages in this turn.
         near['nearby_known_objects']=[{'object_id':'new','kind':'house','distance_engine_units':1}]
-        second=session.call('inspect_surrounding',{**args,'offset':10})
-        third=session.call('inspect_surrounding',{**args,'offset':second['next_offset']})
+        second=session.call('find_objects',{**args,'offset':10, 'scope':'nearby', 'detail':'detailed'})
+        third=session.call('find_objects',{**args,'offset':second['next_offset'], 'scope':'nearby', 'detail':'detailed'})
         ids=[o['object_id'] for page in (first,second,third) for o in page['objects']]
         self.assertEqual(len(ids),24);self.assertEqual(len(set(ids)),24)
         self.assertIsNone(third['next_offset'])
         self.assertNotIn('lookup_handle',json.dumps(session.trace))
-        refreshed=session.call('inspect_surrounding',args)
+        refreshed=session.call('find_objects',{**args, 'scope':'nearby', 'detail':'detailed'})
         self.assertEqual([o['object_id'] for o in refreshed['objects']],['new'])
         fresh_session,_,_=bound(WorldHarness(),source)
-        self.assertEqual(fresh_session.call('inspect_surrounding',args)['objects'],refreshed['objects'])
+        self.assertEqual(fresh_session.call('find_objects',{**args, 'scope':'nearby', 'detail':'detailed'})['objects'],refreshed['objects'])
 
     def test_later_inspection_page_resolves_its_own_target_and_town(self):
         h=WorldHarness();h.probe['world_actions']['offers']=[]
@@ -124,12 +126,13 @@ class ToolInterfaceTests(unittest.TestCase):
             return [{'object_id':identity,'kind':'house','distance_engine_units':11,
                      'target_id':'world-'+'f'*32}]
         session,_,_=bound(h,source,resolve)
-        result=session.call('inspect_surrounding',{'kind':'house','limit':10,'offset':10,'action':'move_to'})
+        result=session.call('find_targets',{'kind':'house','limit':10,'offset':10,'action':'move_to', 'scope':'nearby'})
         self.assertEqual(resolved,[('10','move_to')])
-        self.assertEqual(result['towns'],[{'town_id':'town-a'}])
+        described=session.call('find_objects',{'type':'house','limit':10,'offset':10,'scope':'nearby','detail':'detailed'})
+        self.assertEqual(described['towns'],[{'town_id':'town-a'}])
         self.assertEqual(result['action_targets'][0]['object_id'],'10')
         self.assertEqual(result['action_targets'][0]['type'],'house')
-        self.assertEqual(session.call('move_to',{'destination':{'target_id':result['action_targets'][0]['target_id']}})['status'],
+        self.assertEqual(session.call('move_to',{'target':result['action_targets'][0]['object_id']})['status'],
                          'selected_pending_final_reply')
         self.assertFalse(h.sent)
 
@@ -139,7 +142,7 @@ class ToolInterfaceTests(unittest.TestCase):
                              {'object_id':'near-hand','kind':'house','distance_engine_units':500,'distance_to_god_hand_engine_units':10}]}
         session,_,_=bound(WorldHarness(),source)
         for center,expected in [('creature','near-self'),('god_hand','near-hand')]:
-            result=session.call('inspect_surrounding',{'kind':'house','limit':10,'offset':0,'center':center})
+            result=session.call('find_objects',{'kind':'house','limit':10,'offset':0,'center':center, 'scope':'nearby', 'detail':'detailed'})
             self.assertEqual([o['object_id'] for o in result['objects']],[expected])
 
     def test_grouped_eat_dispatches_correct_native_recipe_for_every_source(self):
@@ -167,7 +170,7 @@ class ToolInterfaceTests(unittest.TestCase):
             return [{'object_id':'house-a','kind':'house','target_id':'world-'+'f'*32}] if identity=='house-a' else []
         session,_,_=bound(WorldHarness(),resolver=resolve)
         result=session.call('move_to',{'destination':{'object_id':'missing'}})
-        self.assertEqual(result['status'],'object_not_currently_approachable')
+        self.assertEqual(result['status'],'invalid_target')
         self.assertIsNone(session.inner.selected_action)
         result=session.call('move_to',{'destination':{'object_id':'house-a'},'pace':'run'})
         self.assertEqual(result['selected_object']['object_id'],'house-a')
@@ -234,7 +237,7 @@ class ToolInterfaceTests(unittest.TestCase):
         source=frame();source['observation']['surroundings']['known_objects']=[{**deepcopy(found),'kind':'storage'}]
         session.supplier=lambda:source;session.inner.supplier=lambda:source
         obj=session.call('inspect_object',{'object_id':found['object_id']})['object']
-        selected=session.call('move_to',{'destination':{'target_id':found['target_id']}})['selected_object']
+        selected=session.call('move_to',{'target':found['object_id']})['selected_object']
         for result in (found,obj,selected):
             self.assertEqual(result['type'],'storage');self.assertNotIn('name',result)
             self.assertEqual(result['object_id'],found['object_id'])
@@ -254,7 +257,7 @@ class SixRoundTests(unittest.IsolatedAsyncioTestCase):
             def handler(req):
                 wires.append(json.loads(req.content));n=len(wires)
                 if n==1:tool,args='inspect_self',{}
-                elif n==2:tool,args='inspect_surrounding',{'kind':'tree','offset':0,'limit':1}
+                elif n==2:tool,args='find_objects',{'type':'tree','offset':0,'limit':1,'scope':'nearby'}
                 elif n==3:tool,args='find_targets',{'kind':'tree','limit':1,'action':'poo_on'}
                 elif n==4:
                     target=made[0].trace[-1]['result']['action_targets'][0]['target_id']
@@ -276,6 +279,6 @@ class SixRoundTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(h.sent)
                 messages=wires[0]['input' if api=='responses' else 'messages']
                 self.assertIn('no discovery',messages[0]['content'])
-                for name in ('move_to','use_held_object','inspect_surrounding','find_targets','update_memory'):
+                for name in ('move_to','use_held_object','find_objects','find_targets','update_memory'):
                     self.assertIn(name,messages[0]['content'])
             finally:await p.close()

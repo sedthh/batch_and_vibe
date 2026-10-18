@@ -2,16 +2,19 @@
 from types import MappingProxyType
 import json
 import re
+from .action_probe import HELD_GESTURES
 
 
-# Fixed whole-body recipes; engine offers determine availability for this creature.
+# Fixed gesture recipes; engine offers determine availability for this creature.
 EXPRESSION_GESTURES = MappingProxyType({
     '😕':'look_confused', '👋':'wave', '💃':'dance', '🤧':'sneeze',
     '🥶':'shiver', '🐾':'scratch', '🥵':'show_hotness', '🪑':'sit_down',
     '👀':'look_at_player', '🐺':'howl', '😂':'laugh', '😭':'cry',
     '💡':'show_realization', '🙏':'pray',
+    '🔍':'look_at_held', '👂':'shake_held', '👃':'smell_held', '🫳':'stroke_held',
 })
 GESTURE_ACTIONS = frozenset(EXPRESSION_GESTURES.values()) | {'dance_with_villagers'}
+RECOVERED_GESTURES = frozenset({'howl','laugh','cry','show_realization','pray'})
 EXPRESSION_CONTRACT = """Hidden body-gesture cues: include at most one in say (or direct answer without say).
 The bridge detects cues anywhere in that text. If several are present, only the
 first supported cue in reading order is selected; unsupported emojis are ignored.
@@ -32,12 +35,20 @@ it uses the solo dance. No extra tool call or villager ID is needed for this cue
 😭 cry: request the species' body crying animation, if its clip exists.
 💡 show_realization: request the body aha/realization animation.
 🙏 pray: request the native body prayer animation in this fictional game.
+🔍 look_at_held: look closely at the object in your own hand.
+👂 shake_held: raise your held object to your ear and shake/listen to it.
+👃 smell_held: bring your held object toward your nose and sniff it.
+🫳 stroke_held: gently stroke the object in your own hand.
+These four held-item cues require you to be holding something. They never fetch
+an object and do not refer to the god's hand, self-grooming or being petted.
+An inspection of your own held item normally picks examine, shake or smell at
+random, never stroke. Include one of these four cues with that inspection to
+choose its exact gesture instead of the random pick; this is still ONE action.
+The cue alone plays the gesture without inspecting or returning item details.
 Most cues request animations, not direct changes to needs, beliefs, alignment or
 mood. The group-dance variant is a native social activity that recruits villagers.
-Some species may lack a clip; requests can fail. The howl, laugh, cry,
-show_realization and pray mappings are wired but their visible effects have not
-been confirmed in QA. You may still request them. No facial-only
-commands are available.
+Appearance and clip availability can vary by species; requests can fail.
+No facial-only commands are available.
 When God explicitly asks for a supported gesture, REQUEST IT with its cue; do not
 replace it with a description, imagined tail-wagging, barking, or an unrelated tool.
 For "wave hello to me", return answer="👋", say=null and
@@ -50,8 +61,9 @@ the bridge checks playback availability and silently skips cues the engine canno
 play. A skipped cue does not cancel the accompanying speech. Do not invent an
 availability restriction or an apology just because a cue might not play.
 No other emojis. UI strips emojis; empty/whitespace/emoji-only replies stay silent.
-If any physical action tool selected an action (do_action, move_to or
-use_held_object), use no emoji cues in answer or say, even alongside spoken text.
+If any physical action tool selected an action (including held-item inspection),
+use no emoji cues in answer or say except the held-item choice described above.
+That choice changes the inspection's gesture; it never adds a second action.
 This applies even though the final JSON decision is {"candidate":null}; the
 host retains the tool selection. Legacy non-null decisions also exclude cues.
 Competing actions skip gestures. The host may briefly wait for an eligible moment;
@@ -107,29 +119,32 @@ def display_reply(reply):
             for key, value in reply.items()}
 
 
-def expression_from_speech(text):
+def expression_from_speech(text, *, reenable_cut_content=True):
     """Select the first supported cue anywhere in newly validated speech, once."""
     if not isinstance(text, str):
         return None
     # Read text order, not mapping order. Presentation selectors and skin-tone
     # modifiers do not change a supported base emoji's meaning.
     for character in text:
-        if character in EXPRESSION_GESTURES:
+        if character in EXPRESSION_GESTURES and (reenable_cut_content
+                or EXPRESSION_GESTURES[character] not in RECOVERED_GESTURES):
             return {'emoji': character, 'candidate': EXPRESSION_GESTURES[character]}
     return None
 
 
-def speech_expression(text, decision, *, dispatcher=None):
+def speech_expression(text, decision, *, dispatcher=None, reenable_cut_content=True):
     """Use the supplied response-bound executor; never mint native capabilities.
 
     An enabled executor supplies a dispatcher bound to this response's original
     request. This helper deliberately cannot create an offer itself. A waiting
     intention or transport receipt is not evidence that a gesture happened.
     """
-    cue = expression_from_speech(text)
+    cue = expression_from_speech(text, reenable_cut_content=reenable_cut_content)
     if cue is None:
         return None
     if decision != {'candidate': None}:
+        if cue['candidate'] in HELD_GESTURES and decision == {'candidate':cue['candidate']}:
+            return {**cue, 'status': 'selected_with_inspection'}
         return {**cue, 'status': 'skipped_action_conflict'}
     if dispatcher is None:
         return {**cue, 'status': 'skipped_executor_unavailable'}
