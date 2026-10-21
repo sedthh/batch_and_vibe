@@ -21,7 +21,8 @@ For native changes, build and run the synthetic checks:
 ```
 
 Close the game before installing a changed DLL with `Start-Mod.cmd --install`.
-Use `--dummy` for game tests without provider charges. Record what you actually
+Use `--dummy` for game tests without paid LLM calls; API voice can still incur
+transcription charges if you use it. Record what you actually
 observed; an accepted command or ended plan does not prove its effect occurred.
 
 ## What to share

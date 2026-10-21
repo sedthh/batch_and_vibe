@@ -20,6 +20,10 @@ from .overlay import OverlayModel, ChatSubmission, ReplyReveal, overlay_bounds
 from .errors import ChatNotSubmitted
 
 
+CHAT_TEXT_COLOR = '#f1f3f5'
+CHAT_ERROR_COLOR = '#f2a6b3'
+
+
 class Windows:
     HOTKEY=0x4257
     def __init__(self):
@@ -33,6 +37,7 @@ class Windows:
             'GetClientRect':([wintypes.HWND,ctypes.POINTER(wintypes.RECT)],wintypes.BOOL),
             'ClientToScreen':([wintypes.HWND,ctypes.POINTER(wintypes.POINT)],wintypes.BOOL),
             'GetForegroundWindow':([],wintypes.HWND),
+            'GetAsyncKeyState':([ctypes.c_int],ctypes.c_short),
             'GetAncestor':([wintypes.HWND,wintypes.UINT],wintypes.HWND),
             'IsWindowVisible':([wintypes.HWND],wintypes.BOOL),
             'IsIconic':([wintypes.HWND],wintypes.BOOL),
@@ -127,7 +132,7 @@ def hotkey_loop(user32, stop, wanted, emit):
 
 
 class OverlayWindow:
-    def __init__(self, client, *, seconds=43200, diagnostics_file=None):
+    def __init__(self, client, *, seconds=43200, diagnostics_file=None, settings_path=None):
         import tkinter as tk
         if type(seconds) is not int or not 1<=seconds<=43200:
             raise ValueError('Invalid overlay duration')
@@ -156,21 +161,24 @@ class OverlayWindow:
         self.indicator=tk.Label(self.header,text='',width=2,anchor='e',
             bg='#292929',fg='#dedede',font=('Segoe UI',9,'bold'))
         self.indicator.pack(side='right')
-        self.heading=tk.Label(self.header,text='Chat with creature · Ctrl+Enter',anchor='w',
+        self.heading=tk.Label(self.header,text='Chat Ctrl+Enter',anchor='w',
             bg='#292929',fg='#f1d3a0',font=('Segoe UI',9,'bold'))
         self.heading.pack(side='left',fill='x',expand=True)
         self.message_box=tk.Frame(self.root,bg='#292929')
         self.message=tk.Text(self.message_box,height=3,wrap='word',state='disabled',
             relief='flat',borderwidth=0,highlightthickness=0,takefocus=False,
-            bg='#292929',fg='#f1f3f5',font=font)
+            bg='#292929',fg=CHAT_TEXT_COLOR,font=font)
         self.message_scroll=tk.Scrollbar(self.message_box,orient='vertical',
             command=self.message.yview,takefocus=False)
         self.message.configure(yscrollcommand=self.message_scroll.set)
         self.message.pack(side='left',fill='both',expand=True)
         self.message_text=''
         self.form=tk.Frame(self.root,bg='#292929')
-        self.entry=tk.Entry(self.form,font=font,bg='#3b3b3b',fg='white',insertbackground='white')
-        self.entry.pack(side='left',fill='x',expand=True)
+        self.input_box=tk.Frame(self.form,bg='#3b3b3b')
+        self.input_box.pack(side='left',fill='x',expand=True)
+        self.entry=tk.Entry(self.input_box,font=font,bg='#3b3b3b',fg='white',insertbackground='white',
+            disabledbackground='#3b3b3b',disabledforeground='#dedede')
+        self.entry.pack(fill='x',expand=True)
         self.send=tk.Button(self.form,text='Send',command=self.submit,font=font)
         self.send.pack(side='left',padx=(6,0))
         tk.Button(self.form,text='Close',command=self.collapse,font=font).pack(side='left',padx=(6,0))
@@ -183,6 +191,17 @@ class OverlayWindow:
         self.root.protocol('WM_DELETE_WINDOW',self.close)
         self.root.update_idletasks()
         self.hwnd=self.win.u.GetAncestor(self.root.winfo_id(),2)
+        self.voice = None
+        self.voice_meter = None
+        if settings_path is not None:
+            from .llm import LLMConfig
+            from .voice_overlay import VoiceOverlay, VoiceInputMeter
+            voice = LLMConfig.load(settings_path).voice
+            if voice.input_enabled:
+                self.voice = VoiceOverlay(self, voice, settings_path)
+                self.voice_meter = VoiceInputMeter(self.input_box, font)
+                binding = {'F11': '<F11>', 'Ctrl+F11': '<Control-F11>'}[voice.hotkey]
+                self.entry.bind(binding, lambda event: 'break')
         self.win.own_style(self.hwnd,False)
         self.hotkey_thread=threading.Thread(target=hotkey_loop,
             args=(self.win.u,self.stop,self.want_hotkey,self.emit),daemon=True)
@@ -211,15 +230,23 @@ class OverlayWindow:
         if foreground not in (self.game,self.hwnd):return
         if self.expanded:
             self.collapse();return
+        self.open_input()
+
+    def open_input(self, *, focus=True):
+        """Show the shared draft; automatic voice sending keeps focus in the game."""
+        if not self.model.can_show():return
+        if self.win.u.GetForegroundWindow() not in (self.game,self.hwnd):return
         self.expanded=True
         self.win.own_style(self.hwnd,True)
-        self.win.u.ShowWindow(self.hwnd,5)
+        self.win.u.ShowWindow(self.hwnd,5 if focus else 4)
         self._visible=True
-        self.win.u.SetForegroundWindow(self.hwnd)
-        self.root.after_idle(self.entry.focus_set)
+        if focus:
+            self.win.u.SetForegroundWindow(self.hwnd)
+            self.root.after_idle(self.entry.focus_set)
         self.render()
 
     def collapse(self):
+        if getattr(self,'voice',None): self.voice.cancel()
         self.restore_input_focus=False
         focused=self.win.u.GetForegroundWindow()==self.hwnd
         self.expanded=False;self.win.own_style(self.hwnd,False)
@@ -229,7 +256,7 @@ class OverlayWindow:
         return 'break'
 
     def submit(self):
-        if self.pending:return 'break'
+        if self.pending or (getattr(self,'voice',None) and self.voice.active):return 'break'
         text=self.entry.get().strip()
         if not text:return 'break'
         identity=self.model.identity or self.target_identity
@@ -238,7 +265,7 @@ class OverlayWindow:
             self.render();return 'break'
         self.input_history.submitted(text)
         self.pending=True;self.notice=''
-        self.submission=ChatSubmission(text,identity,time.monotonic()+15)
+        self.submission=ChatSubmission(text,identity,time.monotonic()+10)
         self.advance_submission()
         self.render()
         return 'break'
@@ -268,7 +295,7 @@ class OverlayWindow:
         threading.Thread(target=send,daemon=True).start()
 
     def browse_input(self, direction):
-        if self.pending:return 'break'
+        if self.pending or (getattr(self,'voice',None) and self.voice.active):return 'break'
         text=self.input_history.move(direction,self.entry.get())
         self.entry.delete(0,'end');self.entry.insert(0,text);self.entry.icursor('end')
         return 'break'
@@ -289,6 +316,8 @@ class OverlayWindow:
             self.diagnostics(False)
             return
         now=time.monotonic()
+        voice=getattr(self,'voice',None)
+        voice_busy=bool(voice and voice.active)
         speech=self.model.banner_text(pending=self.pending,notice=self.notice,now=now)
         submission=getattr(self,'submission',None)
         if submission is not None and not submission.sending:
@@ -302,13 +331,14 @@ class OverlayWindow:
             speech=self.reply_reveal.reveal(speech,message_key,now)
         elif not reply:
             self.reply_reveal.clear()
-        title=self.model.chat_title+' · Ctrl+Enter'
+        title='Chat Ctrl+Enter'
+        if voice:title += '   -   Voice '+voice.config.hotkey
         if self.model.is_dummy:
             title += ' · Dummy'
         if self.hotkey_failed:title='Ctrl+Enter is already in use'
         indicator=self.model.call_indicator(pending=self.pending)
         button_text='Waiting…' if submission is not None and not submission.sending else 'Send'
-        content=(title,indicator,bool(speech),self.expanded,self.pending,bool(self.model.identity),button_text)
+        content=(title,indicator,bool(speech),self.expanded,self.pending,bool(self.model.identity),button_text,voice_busy)
         # Tk configure/pack calls invalidate the layered window even when their
         # values are unchanged. Poll availability promptly without repainting
         # the overlay over the game's render surface on every timer tick.
@@ -325,15 +355,17 @@ class OverlayWindow:
                 self.form.pack(fill='x',side='bottom',padx=8,pady=(0,5))
             else:
                 self.form.pack_forget()
-            self.entry.configure(state='normal' if not self.pending else 'disabled')
-            self.send.configure(state='normal' if self.model.identity and not self.pending else 'disabled')
+            self.entry.configure(state='normal' if not self.pending and not voice_busy else 'disabled')
+            self.send.configure(state='normal' if self.model.identity and not self.pending and not voice_busy else 'disabled')
             self.send.configure(text=button_text)
             self._content_state=content
+        if voice:voice.render_input()
         if speech!=self.message_text:
             append=bool(message_key is not None and message_key==self._message_key
                 and self.message_text and speech.startswith(self.message_text))
             follow=append and self.message.yview()[1]>=.999
-            self.message.configure(state='normal')
+            is_error=speech.startswith(('[ERROR:', '[Message not sent:', '[Chat session changed.'))
+            self.message.configure(state='normal',fg=CHAT_ERROR_COLOR if is_error else CHAT_TEXT_COLOR)
             if append:
                 self.message.insert('end-1c',speech[len(self.message_text):])
             else:
@@ -415,6 +447,8 @@ class OverlayWindow:
             elif kind=='toggle':
                 self.hotkey_events+=1
                 self.toggle()
+            elif kind.startswith('voice_') and getattr(self,'voice',None):
+                self.voice.handle(kind,value)
             elif kind in ('reply','failed','not_submitted'):
                 submission,result=value
                 if submission is not getattr(self,'submission',None):continue
@@ -449,6 +483,7 @@ class OverlayWindow:
         self.advance_submission()
         if not self.game or self.win.pid(self.game)!=self.model.game_pid or not self.win.rect(self.game):
             self.game=self.win.game_window(self.model.game_pid)
+        if getattr(self,'voice',None):self.voice.tick()
         if self.expanded and self.model.can_send() and self.win.u.GetForegroundWindow() not in (0,self.game,self.hwnd):
             self.expanded=False;self.win.own_style(self.hwnd,False)
             self.restore_input_focus=False
@@ -458,6 +493,7 @@ class OverlayWindow:
     def close(self):
         if self.closed:return
         self.closed=True;self.stop.set()
+        if getattr(self,'voice',None):self.voice.close()
         self.hotkey_thread.join(.5)
         self.root.destroy()
 
@@ -470,8 +506,8 @@ def parent_shutdown(stream, emit):
         emit('shutdown', None)
 
 
-def run_window(client, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False):
-    window=OverlayWindow(client,seconds=seconds,diagnostics_file=diagnostics_file)
+def run_window(client, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False, settings_path=None):
+    window=OverlayWindow(client,seconds=seconds,diagnostics_file=diagnostics_file,settings_path=settings_path)
     if stop_on_stdin:
         threading.Thread(target=parent_shutdown,args=(sys.stdin,window.emit),daemon=True).start()
     try:window.root.mainloop()

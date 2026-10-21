@@ -801,6 +801,7 @@ class LiveChatRuntime:
             # values, credential variable names, dotenv contents or file paths.
             effective=asdict(self.settings)
             effective.pop('api_key_env',None)
+            effective.pop('voice',None)  # Overlay-only device/model paths and credential variable.
             effective['cadence']=asdict(self.cadence)
             effective['prompts']=asdict(self.prompt_settings)
             metadata['settings']=effective

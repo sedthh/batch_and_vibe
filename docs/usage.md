@@ -78,6 +78,74 @@ New model calls, including tool follow-ups, pause in unsupported fullscreen mode
 when the game window is minimized/unavailable, or if the overlay process exits.
 Already-sent requests cannot be un-sent. Windowed mode resumes with fresh observations.
 
+## Voice input
+
+Open **Model, API key & settings → Voice**, enable push-to-talk, and choose a preset:
+
+- **Local Whisper:** speech stays on your computer. From the repository folder,
+  install the optional model runtime once:
+  `.venv\Scripts\python.exe -m pip install -e ".[voice-local]"`.
+  Start with the `base` model; `tiny` is faster and `small` may be more accurate.
+  The first recording downloads the chosen model to `.local/speech-models`, so it
+  takes longer. You can also enter an existing faster-whisper model folder.
+  Processing uses two CPU threads and loads one model at a time.
+- **OpenAI transcription:** enter a speech model and API key. The preset uses
+  `gpt-transcribe`. The speech provider can differ from your chat provider.
+- **Groq Whisper:** choose **fast** (`whisper-large-v3-turbo`) or **accuracy**
+  (`whisper-large-v3`), then enter your Groq key.
+  See [Groq's speech models](https://console.groq.com/docs/speech-to-text).
+- **Together AI:** uses `openai/whisper-large-v3`; enter your Together key.
+  See [Together's transcription guide](https://docs.together.ai/docs/inference/transcription/overview).
+- **Custom compatible API:** enter your provider's speech model, base URL and key.
+- **Local compatible server:** enter its model and base URL, and leave the key
+  variable blank if it needs no key. Other remote providers work if they support
+  the OpenAI-compatible `/audio/transcriptions` endpoint and JSON text responses.
+  Remote URLs must use HTTPS. An LLM-compatible API does not necessarily support audio.
+
+Presets fill in the connection details without changing your language, microphone,
+shortcut or voice limits. The model field stays editable. Applying a preset clears
+any key you are currently typing; it does not delete saved keys or change chat settings.
+
+Run `Setup-Mod.cmd` again if microphone support is missing. Choose your microphone
+with **Refresh**, or leave it blank for the Windows default. Allow microphone access
+for desktop apps in Windows settings. **Save & apply** reloads voice settings too.
+
+In the game, hold **F11**, speak, and release. The input field shows **[Listening]**
+with a volume bar that grows as you speak louder, then **[Transcribing]**.
+The creature's reply stays visible above it. The words it heard then replace the
+status in the normal chat input.
+It sends them just like a typed message: the field stays visible and disabled while
+waiting, then clears and becomes editable when the reply starts appearing.
+If sending fails, the text stays in the field so you can edit or retry it.
+You can change the shortcut and turn off automatic sending to review the words
+before pressing Enter. **Escape** cancels recording or transcription;
+leaving the game window or entering a menu also cancels an unfinished recording
+or transcription. Finish or clear a typed draft before recording. The default
+recording limit is 60 seconds; reaching it stops recording and transcribes the clip.
+
+Only a key press opens the microphone. Audio stays in memory and is discarded after
+transcription; the mod does not save recordings. API mode sends that recording to
+your chosen speech provider and may cost money, **even with dummy chat enabled**.
+
+For voice troubleshooting, create an empty `.local/voice-debug.enabled` file,
+then use **Save & apply**. The local `.local/voice-diagnostics.json` log keeps only
+the latest 20 attempts: transcript, detected language, timing and audio levels.
+It contains spoken text but no audio or API keys. Remove the marker and apply
+settings again to stop logging. These files are ignored by Git.
+Cancelling discards the result but cannot retract an API request already sent.
+Local mode runs offline after its model download. The resulting words use normal
+creature chat and its existing history, usage limits and action rules. Speech API
+usage is separate from the LLM message cap and token counter. Creature replies are
+still text; this version does not speak them aloud.
+
+The **Voice** tab has optional API limits for transcription requests and total
+audio minutes per run. Leave either blank for unlimited usage. A recording that
+would exceed the audio budget is not uploaded; you can record a shorter message
+or change the limit. Failed requests and requests cancelled after sending count
+toward both limits because the provider may already have processed the audio.
+Reaching a cap leaves typed chat available. These limits do not cap local Whisper.
+Restarting the mod or using **Save & apply** starts a fresh voice budget.
+
 ## Settings and debugging
 
 The mod window's **Model, API key & settings** button opens configuration. Settings
@@ -115,7 +183,7 @@ Run these from a terminal in the repository:
 | --- | --- |
 | `Start-Mod.cmd --debug` | Enable and print localhost observer and LLM debugger URLs. |
 | `Start-Mod.cmd --debug --port 8080` | Use a chosen port for both debugger pages. |
-| `Start-Mod.cmd --dummy` | Use a dummy model without paid API calls. |
+| `Start-Mod.cmd --dummy` | Use dummy chat without paid LLM calls. API voice still has its own charges. |
 | `Start-Mod.cmd --no-ticks` | Send direct questions only. |
 | `Start-Mod.cmd --no-actions` | Disable creature commands for diagnosis. |
 | `Start-Mod.cmd --uninstall` | Restore the original DLL; close the game first. |

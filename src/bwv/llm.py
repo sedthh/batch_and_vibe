@@ -20,6 +20,7 @@ import tempfile
 from importlib.resources import files as package_files
 from .cadence import CadenceSettings
 from .prompt_settings import PromptSettings
+from .voice import VoiceSettings
 from .creature_tools import ToolArgumentError, ToolContextUnavailable, TOOL_CONTRACT
 from copy import deepcopy
 from .token_usage import TokenUsage
@@ -51,8 +52,13 @@ class LLMConfig:
     wake_on_question: bool = False
     reenable_cut_content: bool = True
     prompts: PromptSettings = field(default_factory=PromptSettings)
+    voice: VoiceSettings = field(default_factory=VoiceSettings)
 
     def __post_init__(self):
+        if isinstance(self.voice, dict):
+            object.__setattr__(self, 'voice', VoiceSettings.parse(self.voice))
+        if not isinstance(self.voice, VoiceSettings):
+            raise ValueError('Invalid voice settings')
         if type(self.wake_on_question) is not bool:
             raise ValueError('wake_on_question must be a boolean')
         if type(self.reenable_cut_content) is not bool:
@@ -637,11 +643,9 @@ class LLMProvider:
         finally:
             self.active -= 1
         # No transport retries; one diagnosed final-text repair is handled above.
-        # Automatic observations wait; explicit requests fail
-        # promptly during cooldown. A fixed error code is all that escapes.
-        # A local scene/read interruption is not an API outage. A short pause
-        # prevents a retry storm without locking recovered gameplay for a minute.
-        self.blocked_until = self.clock()+(2 if self.last_error=='tool_context_unavailable' else 60)
+        # Later requests wait for cooldown; failed requests are not replayed.
+        # Local scene/read interruptions get a shorter pause than provider errors.
+        self.blocked_until = self.clock()+(2 if self.last_error=='tool_context_unavailable' else 30)
         raise ProviderError(self.last_error) from None
 
     async def close(self):

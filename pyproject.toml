@@ -13,7 +13,9 @@ dependencies = []
 [project.optional-dependencies]
 llm = ["httpx>=0.27,<1"]
 service = ["fastapi>=0.115,<1", "uvicorn>=0.30,<1", "httpx>=0.27,<1"]
-launcher = ["httpx>=0.27,<1", "ziglang==0.14.1"]
+launcher = ["httpx>=0.27,<1", "ziglang==0.14.1", "sounddevice>=0.5,<1"]
+voice = ["httpx>=0.27,<1", "sounddevice>=0.5,<1"]
+voice-local = ["sounddevice>=0.5,<1", "faster-whisper>=1.1,<2"]
 
 [project.scripts]
 bwv = "bwv.cli:main"
