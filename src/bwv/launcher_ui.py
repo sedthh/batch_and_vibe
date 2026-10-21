@@ -40,7 +40,7 @@ def apply_provider_preset(values, key, name):
     key.set('')
 
 
-def save_basics(path, values, key=''):
+def save_basics(path, values, key='', *, voice_key=''):
     """Merge form fields into the latest private settings; preserve advanced fields."""
     path = Path(path)
     data = asdict(LLMConfig.load(path))
@@ -48,6 +48,8 @@ def save_basics(path, values, key=''):
         data['prompts'] = {'general': values['general_prompt']}
     if 'reenable_cut_content' in values:
         data['reenable_cut_content'] = values['reenable_cut_content']
+    from .voice_settings_ui import voice_form_values
+    data['voice'].update(voice_form_values(values))
     for field in ('model', 'api', 'base_url', 'output_format', 'token_parameter'):
         data[field] = values[field].strip()
     data['api_key_env'] = values['api_key_env'].strip() or None
@@ -74,19 +76,24 @@ def save_basics(path, values, key=''):
     config = LLMConfig(**data)
     if config.model == 'YOUR_MODEL_ID':
         raise ValueError('Enter the model ID supplied by your provider or local server.')
-    key = key.strip()
-    if key and (config.api_key_env is None or any(ord(c) < 33 or ord(c) > 126 or c in '\"\'' for c in key)):
-        raise ValueError('Use a single-line API key and set its environment-variable name.')
+    credentials = {}
+    for name, secret in ((config.api_key_env, key.strip()), (config.voice.api_key_env, voice_key.strip())):
+        if not secret: continue
+        if name is None or any(ord(c) < 33 or ord(c) > 126 or c in '\"\'' for c in secret):
+            raise ValueError('Use a single-line API key and set its environment-variable name.')
+        if name in credentials and credentials[name] != secret:
+            raise ValueError('Use different key variable names for different LLM and voice API keys.')
+        credentials[name] = secret
     env_path = path.parent / '.local' / '.env'
     content = None
-    if key:
+    if credentials:
         try:
             previous = env_path.read_text('utf-8-sig') if env_path.exists() else ''
         except (OSError, UnicodeError):
             raise ValueError('Cannot read the private API-key file. Nothing was saved.') from None
-        pattern = re.compile(r'^\s*(?:export\s+)?' + re.escape(config.api_key_env) + r'\s*=')
+        pattern = re.compile(r'^\s*(?:export\s+)?(?:' + '|'.join(re.escape(n) for n in credentials) + r')\s*=')
         lines = [line for line in previous.splitlines() if not pattern.match(line)]
-        content = '\n'.join([*lines, f'{config.api_key_env}={key}', ''])
+        content = '\n'.join([*lines, *(f'{n}={v}' for n, v in credentials.items()), ''])
     # Validation happens before either file is modified. Blank key preserves it.
     config.save(path)
     if content is not None:
@@ -124,6 +131,8 @@ class SettingsWindow:
             'Saved locally for the next mod start. Saving sends no API requests.')).pack(anchor='w', pady=(4, 10))
         tabs = ttk.Notebook(frame); tabs.pack(fill='both', expand=True)
         connection = ttk.Frame(tabs, padding=12); tabs.add(connection, text='Connection')
+        from .voice_settings_ui import VoiceTab
+        self.voice_tab = VoiceTab(tabs, config['voice'], self.values)
         limits = ttk.Frame(tabs, padding=12); tabs.add(limits, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
         prompt = ttk.Frame(tabs, padding=12); tabs.add(prompt, text='General prompt')
@@ -200,11 +209,12 @@ class SettingsWindow:
             try:
                 values = {k: v.get() for k, v in self.values.items()}
                 values['general_prompt'] = self.general_prompt.get('1.0', 'end-1c')
-                saved = save_basics(self.path, values, self.key.get())
+                saved = save_basics(self.path, values, self.key.get(), voice_key=self.voice_tab.key.get())
             except (ValueError, OSError) as error:
                 self.error.set(str(error))
                 return
             self.key.set('')
+            self.voice_tab.key.set('')
             if on_saved is not None:
                 try:
                     on_saved(saved)

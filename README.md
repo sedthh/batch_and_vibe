@@ -1,9 +1,9 @@
 # Black & White LLM Creature Mod
 
 A fan mod created with GPT-6 Astra that adds generative AI to your creature in
-Lionhead's **Black & White**. Talk to your creature, give it instructions, and let
-an LLM think about its needs and surroundings. It builds on the original creature
-AI, which keeps running and learning between LLM commands.
+Lionhead's **Black & White**. Chat by **text or voice**, give your creature
+instructions, and let an LLM think about its needs and surroundings. It builds on
+the original creature AI, which keeps running and learning between LLM commands.
 
 This is an experimental, unofficial project, not affiliated with or endorsed by
 Lionhead Studios or the game's rights holders. **You need your own original game.**
@@ -80,6 +80,12 @@ by default. Restarting the mod starts a new session budget.
 **Reenable cut content** in the main mod window is on by default. It restores
 the mushroom effect and some emotes. You can turn it off at any time.
 
+Prefer talking? Enable **Voice** in settings, choose local Whisper or a compatible
+speech-to-text API, then hold **F11** to speak and release to send. You can
+change the shortcut, review the words before sending, and set separate voice API
+limits for requests and audio minutes. Leave the limits blank for unlimited use.
+See [voice setup](docs/usage.md#voice-input) for the extra local-model installation.
+
 ### Settings
 
 Use the settings window to change your model, the creature's personality and how
@@ -105,8 +111,9 @@ observations, compact model context, memory, errors and token usage. You can als
 switch **Enable debugging** on or off in the mod window while playing, choose a
 port and open either page there. Debugging starts off unless you pass `--debug`;
 no HTTP server runs while it is off. Switching it does not restart chat or the game.
-`--dummy` uses a test model and makes no paid model calls;
-it does not disable game actions. Add `--no-actions` for observation/chat-only tests.
+`--dummy` uses a test chat model without paid LLM calls; API voice can still cost
+money if you use it. It does not disable game actions. Add `--no-actions` for
+observation/chat-only tests.
 Review debug output before sharing it: it can contain private chat and game data.
 
 See [usage](docs/usage.md) for more options, troubleshooting and uninstallation.
@@ -159,7 +166,7 @@ Want to help build or test it? See [contributing](docs/contributing.md).
   with other creatures. Some already happen through the game's original AI.
 - [ ] Test more miracles and their effects.
 - [ ] Check nighttime commands, fire responses, combat and death/revival reporting.
-- [ ] Add voice input through speech-to-text and spoken creature replies.
+- [ ] Add spoken creature replies and test voice input with more microphones and models.
 - [ ] Test later islands, multiplayer, and more game builds.
   Multiplayer is untested; Creature Isle is unsupported. This bridge does
   not work with openblack.

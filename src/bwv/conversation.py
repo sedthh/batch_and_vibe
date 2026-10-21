@@ -469,7 +469,7 @@ class ConversationBroker:
         self._answer_entry = None
         self._answer_started_at = None
         self._waiting_entry = None
-        self.provider_wait_timeout = 65
+        self.provider_wait_timeout = 35
         self._identity = None
         self._speech_identity = None
         self._epoch = 0

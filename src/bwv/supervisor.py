@@ -132,14 +132,18 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
         nonlocal overlay_process
         runtime_ref.append(runtime)
         runtime.set_display_blocker(display.reason)
-        emit('Dummy backend: no API calls.' if dummy else
+        emit('Dummy chat backend: no LLM calls.' if dummy else
              f'Using model {settings.model} from the configured settings.', flush=True)
         emit('Creature actions enabled.' if actions else 'Diagnostic chat-only mode: creature actions disabled by --no-actions.', flush=True)
         emit('Automatic creature thinking enabled.' if automatic else 'Automatic creature thinking off; direct questions remain available.', flush=True)
         if overlay:
+            if settings.voice.input_enabled:
+                emit('Voice input enabled: hold '+settings.voice.hotkey+'. '+
+                    ('Transcription runs locally.' if settings.voice.provider=='local' else
+                     'Recordings use the configured transcription API, including in dummy mode.'), flush=True)
             try:
                 overlay_process = subprocess.Popen([sys.executable, '-m', 'bwv.cli', 'overlay', url,
-                    '--seconds', str(seconds), '--stop-on-stdin'], stdin=subprocess.PIPE,
+                    '--seconds', str(seconds), '--stop-on-stdin', '--settings', str(settings_path)], stdin=subprocess.PIPE,
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             except OSError as error:
                 emit(f'ERROR: Could not start the chat overlay: {error}. Observer and chat remain available.', flush=True)

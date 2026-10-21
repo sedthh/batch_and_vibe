@@ -355,7 +355,7 @@ def overlay_bounds(rect, expanded=False, speaking=False, *, input_height=None):
     return (left+(width-panel_width)//2,top,panel_width,panel_height)
 
 
-def run(url, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False):
+def run(url, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False, settings_path=None):
     from .overlay_windows import run_window
     return run_window(OverlayClient(url),seconds=seconds,diagnostics_file=diagnostics_file,
-                      stop_on_stdin=stop_on_stdin)
+                      stop_on_stdin=stop_on_stdin,settings_path=settings_path)

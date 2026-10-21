@@ -52,7 +52,9 @@ class SubmissionTests(unittest.TestCase):
 
     def test_persistent_gap_unlocks_with_original_text_and_no_later_send(self):
         w=self.window;w.model.read_gap();w.submit()
-        self.now+=15;w.tick()
+        self.now=109.9;w.tick()
+        self.assertTrue(w.pending);w.client.ask.assert_not_called()
+        self.now=110;w.tick()
         self.assertFalse(w.pending);self.assertEqual(w.entry.get(),'Come here')
         self.assertEqual(w.entry.state,'normal');self.assertIn('press Enter',w.notice)
         self.now+=1;self.refresh();w.tick();w.client.ask.assert_not_called()

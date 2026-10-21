@@ -247,7 +247,10 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len(calls), 1)
             self.assertEqual(provider.disabled, disabled)
             self.assertNotIn('private details', repr(provider.status()))
-            self.now += 61
+            self.assertEqual(provider.status()['retry_after_seconds'],30)
+            self.now += 29.9
+            self.assertFalse(provider.ready())
+            self.now += .1
             self.assertEqual(provider.ready(), not disabled)
 
     async def test_malformed_incomplete_refusal_actions_and_oversized_replies_rejected(self):
@@ -339,11 +342,13 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
         provider = self.provider(broken)
         with self.assertRaisesRegex(ProviderError, '^connection_failed$'):
             await provider.respond(request())
+        self.assertEqual(provider.status()['retry_after_seconds'],30)
         async def slow(req):
             await asyncio.sleep(10)
         provider = self.provider(slow, timeout_seconds=1)
         with self.assertRaisesRegex(ProviderError, '^request_timeout$'):
             await provider.respond(request())
+        self.assertEqual(provider.status()['retry_after_seconds'],30)
         with self.assertRaises(ValueError):
             LLMProvider(LLMConfig('test-model'), environ={})
 
@@ -378,14 +383,14 @@ class ProviderTests(unittest.IsolatedAsyncioTestCase):
 class LiveLLMTests(unittest.IsolatedAsyncioTestCase):
     async def test_cooldown_queues_question_and_sends_fresh_context_once(self):
         self.runtime.ingest(self.frame({'surroundings':{'trees_nearby':1}}))
-        self.provider.last_error='rate_limited';self.provider.blocked_until=self.now+8
+        self.provider.last_error='rate_limited';self.provider.blocked_until=self.now+30
         task=asyncio.create_task(self.runtime.question({'question':'What is here?'}))
         try:
             await asyncio.sleep(.02);self.runtime.publish()
             self.assertFalse(task.done());self.assertEqual(self.provider.calls,0)
             self.assertTrue(self.runtime.payload()['current']['answer_status']['waiting_for_provider'])
             self.assertFalse(self.runtime.reset_available())
-            self.now+=8
+            self.now+=30
             self.runtime.ingest(self.frame({'surroundings':{'trees_nearby':9}}))
             await asyncio.wait_for(task,1)
             self.assertEqual(self.provider.calls,1)
@@ -512,7 +517,7 @@ class LiveLLMTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('synthetic-secret', json.dumps(data))
         self.assertNotIn(self.directory.name, json.dumps(data))
         effective=data['runtime']['settings']
-        self.assertEqual(set(effective),set(asdict(self.provider.config))-{'api_key_env'})
+        self.assertEqual(set(effective),set(asdict(self.provider.config))-{'api_key_env','voice'})
         self.assertNotIn('OPENAI_API_KEY',json.dumps(effective))
         self.assertEqual(effective['model'],'test-model')
         self.assertEqual(effective['max_tool_calls'],self.provider.config.max_tool_calls)
