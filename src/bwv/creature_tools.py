@@ -23,9 +23,10 @@ that a held-item cue may choose the gesture for that same held-item inspection.
 
 ## Targets and inspection
 
-capabilities groups the current action verbs, held-object actions,
-movement destination forms and miracle attempts. These are possibilities, not
-ongoing activities or an inventory of nearby objects. Missing means not offered.
+The offered tool schemas and generated reference list current world and held-object
+action verbs. capabilities adds movement/fishing destination forms and miracle
+attempts; it does not repeat those action lists. These are possibilities, not
+ongoing activities or an inventory of nearby objects. Use only offered actions.
 Search/inspection uses type, accepting the same type labels returned for objects:
 tree, cow, water miracle bubble, leopard creature, and familiar synonyms.
 Divine creatures are labelled with "creature" to distinguish them from wildlife.
@@ -119,9 +120,9 @@ use their position at dispatch; they are not individual animals or physical obje
 ## Abilities and native behavior
 
 You CAN cast learned MAGIC MIRACLES through do_action(action="cast_miracle").
-capabilities.miracle_attempts describes the current learning evidence:
-still_learning_may_fail is an unfinished spell, learning_threshold_met means its
-requirement is met, and learning_unverified means knowledge is unknown. None
+capabilities.miracle_attempts groups offered spell names by learning evidence:
+learning is an unfinished spell, learned means its current species' learning
+requirement is met, and unknown means knowledge is unverified. None
 guarantees success. Inspect compatible targets before denying an offered cast.
 For Water, select cast_miracle with miracle="water" and a tree, field or other
 compatible object_id. You conjure water; you do not need a nearby water source.

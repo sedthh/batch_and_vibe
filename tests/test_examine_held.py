@@ -40,8 +40,8 @@ class ExamineHeldTests(unittest.TestCase):
             with self.subTest(emoji=emoji):
                 h = self.gesture_harness()
                 offer, session, request = bind(h)
-                capabilities = session.project_request(request).current['capabilities']
-                self.assertIn('examine', capabilities['held_object_actions'])
+                definitions = {d['name']:d for d in session.definitions()}
+                self.assertIn('examine', definitions['use_held_object']['parameters']['properties']['action']['enum'])
                 self.assertFalse(set(session.actions) & set(HELD_GESTURES))
                 result = speech_expression('Here '+emoji, {'candidate':None}, dispatcher=offer)
                 self.assertEqual(result['status'], 'waiting_for_native')
@@ -133,9 +133,9 @@ class ExamineHeldTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 h = self.harness(kind)
                 offer, session, request = bind(h)
-                capabilities = session.project_request(request).current['capabilities']
-                self.assertIn('examine', capabilities['held_object_actions'])
-                self.assertNotIn('examine_held', capabilities.get('actions', []))
+                definitions = {d['name']:d for d in session.definitions()}
+                self.assertIn('examine', definitions['use_held_object']['parameters']['properties']['action']['enum'])
+                self.assertNotIn('examine_held', session.menu)
                 docs = tool_documentation(session.definitions())
                 self.assertIn('physical examination', docs)
                 self.assertIn('single call', docs)

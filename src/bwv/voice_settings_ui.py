@@ -55,7 +55,7 @@ def microphone_names(sd):
 
 
 class VoiceTab:
-    def __init__(self, tabs, config, values):
+    def __init__(self, tabs, config, values, *, limits_panel):
         import tkinter as tk
         from tkinter import ttk
         panel = ttk.Frame(tabs, padding=12); tabs.add(panel, text='Voice')
@@ -106,8 +106,8 @@ class VoiceTab:
         ttk.Button(mic, text='Refresh', command=refresh).pack(side='left', padx=(4, 0))
         field('max_recording_seconds', 'Maximum recording (seconds)')
         api_fields.append(field('timeout_seconds', 'API transcription timeout (seconds)'))
-        quotas = ttk.LabelFrame(panel, text='Voice API limits per run (optional)', padding=6)
-        quotas.grid(row=panel.grid_size()[1], column=0, columnspan=2, sticky='ew', pady=6)
+        quotas = ttk.LabelFrame(limits_panel, text='Voice API limits per run (optional)', padding=8)
+        quotas.pack(fill='x', pady=(12, 0))
         api_fields.extend((field('max_requests', 'Maximum transcription requests', parent=quotas),
                            field('max_audio_minutes', 'Maximum total audio (minutes)', parent=quotas)))
         ttk.Label(quotas, text='Blank = unlimited. Separate from chat limits; local Whisper is not capped.\n'

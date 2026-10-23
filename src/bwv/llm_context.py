@@ -7,7 +7,7 @@ import re
 from .world_actions import held_miracle_context
 
 
-CONTEXT_CONTRACT = """time_delta_since_last_message_seconds is real elapsed seconds between the
+CONTEXT_CONTRACT = """elapsed_seconds is real elapsed seconds between the
 observations supplied in this message and the previous sent tick or God question.
 It includes time spent waiting or paused, is not the island's simulated time_of_day,
 and is omitted on the first message, after reconnecting, or without fresh readings.
@@ -44,7 +44,7 @@ assume they are percentages. Warmth can be negative and is not a temperature in
 degrees or proof of weather. Non-creature object health retains its engine scale.
 Nearby counts
 cover known objects within 120 engine units: surroundings is around you;
-surroundings_near_god_hand is around your player's hand, possibly far from you.
+hand_surroundings is around your player's hand, possibly far from you.
 Inside each group, people, trees, houses and similar keys are counts; nearby
 is implied. other_creatures is a count; other_creature_details contains the
 optional individual profiles, not additional creatures.
@@ -71,9 +71,11 @@ Coordinates can be remembered with island context but do not identify an object
 or prove it still exists; never reuse them across a changed island/save blindly.
 These views can overlap; do not add their counts. Neither is a complete map or
 verified eyesight. Food/wood pile counts are not resource quantities.
-When surroundings_also_near_god_hand is true, both views contain the same observed
+When shared_surroundings is true, both views contain the same observed
 objects, so surroundings is shared and the duplicate hand summary is omitted.
 Identical town lists are also shown only once in towns_nearby in that case.
+Otherwise a town with only town_id in towns_near_god_hand refers to that same
+town's full entry in towns_nearby in this snapshot, never an earlier message.
 Town needs includes only the demand categories backed by that town's storage
 flags. Internal desires without flags are omitted. top_needs gives the three
 largest positive flag demands; {} means no positive demand among observed flags.
@@ -89,8 +91,12 @@ unread_records counts undecoded records omitted from totals. Do not invent a
 destination or crossing. Inspection describes landmarks; only action_targets
 supplies native actions. Knowing a portal does not mean entering it.
 Teleport connected_exit_ids are other live gates in that player's network, not
-island destinations. When one gate is nearby, its connected gates can also be
-looked up even beyond the local view. use_teleport targets the desired EXIT gate;
+island destinations. Repeated links may instead use portal.network: a zero-based
+index into this snapshot's teleport_networks. Its gate_ids share one network;
+each gate connects to the others in that list. Networks are separate, and neither
+indices nor membership carry across snapshots. Use gate object IDs for actions.
+Inspection still returns connected_exit_ids. When one gate is nearby, its connected
+gates can also be looked up beyond the local view. use_teleport targets the desired EXIT gate;
 the native travel plan approaches another entrance first. Expiry or pathfinding
 can prevent travel, and plan completion alone does not prove a crossing.
 Mushroom counts identify objects, not their edibility or effects. Toy counts
@@ -101,8 +107,8 @@ fishing_areas counts recognized fishing locations, not individual fish or
 an available quantity of food. Use type=fishing_area or type=animal_group to
 inspect/search these locations, and type=animal for individual animals. These
 readings do not establish that a fishing location currently contains fish.
-miracles.learning_threshold_met lists spells meeting your current species' learning
-requirement; partially_learned spells may still be attempted by native AI. Neither
+self.learning.learned lists spells meeting your current species' learning
+requirement; self.learning.partial spells may still be attempted by native AI. Neither
 list proves a successful cast. Miracle learning events mean observed learning
 activity; a current miracle plan is an intention. Spell names use underscores
 between words and distinguish variants where the sensor recognizes them.

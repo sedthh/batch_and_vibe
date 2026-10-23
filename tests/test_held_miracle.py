@@ -32,9 +32,10 @@ class HeldMiracleTests(unittest.TestCase):
         for action in HELD_MIRACLE_ACTIONS:
             h=HeldMiracleHarness(action);offer,s,request=h.session()
             menu=s.project_request(request).current
-            self.assertIn('cast_miracle',menu['capabilities']['held_object_actions'])
-            self.assertNotIn('miracle_attempts',menu['capabilities'])
-            self.assertFalse(any(a in HELD_MIRACLE_ACTIONS for a in menu['capabilities'].get('actions',[])))
+            definitions={d['name']:d for d in s.definitions()}
+            self.assertIn('cast_miracle',definitions['use_held_object']['parameters']['properties']['action']['enum'])
+            self.assertNotIn('miracle_attempts',menu.get('capabilities',{}))
+            self.assertFalse(any(a in HELD_MIRACLE_ACTIONS for a in s.menu))
             targets=s.call('find_targets',{'kind':None,'limit':3,'action':'cast_miracle','source':'held'})['action_targets']
             s.call('use_held_object',{'action':'cast_miracle','target':'self' if action.endswith('_self') else targets[0]['target_id']})
             offer.dispatch(s.finalize_reply({})['decision'])

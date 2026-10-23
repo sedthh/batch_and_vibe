@@ -100,8 +100,8 @@ class DirectCreatureToolSession:
         # Gesture descriptions live only in the fixed system prompt. The host
         # still checks whether a returned cue can execute against this offer.
         capabilities={}
-        if self.menu:capabilities['actions']=list(self.menu)
-        if self.held_menu:capabilities['held_object_actions']=list(self.held_menu)
+        # Action enums already live in the offered schemas/generated reference.
+        # Keep only details those enums cannot express in the current snapshot.
         if 'fish' in self.menu:
             capabilities['fishing_destinations']=[destination for destination,recipe in FISHING_RECIPES.items()
                                                    if recipe in self.actions]
@@ -113,11 +113,13 @@ class DirectCreatureToolSession:
                 ('coordinates',bool(self.position_bounds and 'move_to_position' in self.inner.action_candidates))) if available]
         if self.spells:
             learning=current.get('snapshot',{}).get('self',{}).get('learning',{})
-            capabilities['miracle_attempts']={spell:
-                'still_learning_may_fail' if observed_spell_name(spell) in learning.get('partially_learned',[]) else
-                'learning_threshold_met' if observed_spell_name(spell) in learning.get('learning_threshold_met',[]) else
-                'learning_unverified'
-                for spell in self.spells}
+            attempts={}
+            for spell in self.spells:
+                status=('learning' if observed_spell_name(spell) in learning.get('partial',[]) else
+                        'learned' if observed_spell_name(spell) in learning.get('learned',[]) else
+                        'unknown')
+                attempts.setdefault(status, []).append(spell)
+            capabilities['miracle_attempts']=attempts
         if capabilities:current['capabilities']=capabilities
         messages=[]
         for message in request.messages:

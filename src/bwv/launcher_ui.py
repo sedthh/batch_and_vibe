@@ -131,9 +131,12 @@ class SettingsWindow:
             'Saved locally for the next mod start. Saving sends no API requests.')).pack(anchor='w', pady=(4, 10))
         tabs = ttk.Notebook(frame); tabs.pack(fill='both', expand=True)
         connection = ttk.Frame(tabs, padding=12); tabs.add(connection, text='Connection')
+        limits = ttk.Frame(tabs, padding=12)
+        chat_limits = ttk.LabelFrame(limits, text='Chat limits', padding=8)
+        chat_limits.pack(fill='x')
         from .voice_settings_ui import VoiceTab
-        self.voice_tab = VoiceTab(tabs, config['voice'], self.values)
-        limits = ttk.Frame(tabs, padding=12); tabs.add(limits, text='Limits')
+        self.voice_tab = VoiceTab(tabs, config['voice'], self.values, limits_panel=limits)
+        tabs.add(limits, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
         prompt = ttk.Frame(tabs, padding=12); tabs.add(prompt, text='General prompt')
         ttk.Label(prompt, text='Customize game background, personality and speaking style.\n'
@@ -184,15 +187,20 @@ class SettingsWindow:
                             ('timeout_seconds', 'Call timeout (seconds)'),
                             ('max_tool_rounds', 'Maximum tool rounds per turn'),
                             ('max_tool_calls', 'Maximum tool calls per turn')):
-            field(limits, name, label)
-        field(limits, 'reasoning_effort', 'Reasoning effort (blank = provider default)',
+            field(chat_limits, name, label)
+        field(chat_limits, 'reasoning_effort', 'Reasoning effort (blank = provider default)',
               ('', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh'))
-        ttk.Label(limits, text='One user message or automatic tick counts once, including all tool rounds.\n'
+        ttk.Label(chat_limits, text='One user message or automatic tick counts once, including all tool rounds.\n'
             'Blank means no message cap. API calls and token usage are tracked separately.\n'
             'A message counts when its first API call starts, even if it later fails or is cancelled.\n'
             'The last allowed message can finish; the cap then pauses new messages until restart.\n'
             'Reasoning options and output formats depend on the chosen model.',wraplength=570).grid(
             row=6, column=0, columnspan=2, sticky='w', pady=12)
+        ttk.Label(cadence, text="These are the waits between automatic AI thoughts, chosen to match the creature's surroundings. "
+            'Shorter waits mean more frequent thinking and can increase API costs.\n'
+            'Timing randomness varies the wait; important events can trigger an earlier thought after the cooldown. '
+            "Your chat messages don't wait for these timers.", wraplength=570).grid(
+            row=0, column=0, columnspan=2, sticky='w', pady=(0, 12))
         for name, label in (('active_seconds', 'Active surroundings (seconds)'),
                             ('settlement_seconds', 'Settlement (seconds)'),
                             ('quiet_seconds', 'Quiet surroundings (seconds)'),

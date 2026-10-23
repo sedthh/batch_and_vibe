@@ -29,7 +29,9 @@ class FishingTests(unittest.TestCase):
                 h = WorldHarness()
                 offer, session, request = bind(h)
                 capabilities = session.project_request(request).current['capabilities']
-                self.assertEqual([a for a in capabilities['actions'] if a.startswith('fish')], ['fish'])
+                definitions = {d['name']:d for d in session.definitions()}
+                actions = definitions['do_action']['parameters']['properties']['action']['enum']
+                self.assertEqual([a for a in actions if a.startswith('fish')], ['fish'])
                 self.assertEqual(capabilities['fishing_destinations'],
                                  ['self', 'god_hand', 'player_temple', 'storage', 'worship_site'])
                 doc = tool_documentation(session.definitions())

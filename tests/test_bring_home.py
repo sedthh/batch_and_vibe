@@ -70,9 +70,9 @@ class BringHomeTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 h = self.harness(kind)
                 offer, session, request = bind(h)
-                capabilities = session.project_request(request).current['capabilities']
-                self.assertIn('bring_home', capabilities['held_object_actions'])
-                self.assertNotIn('bring_home', capabilities.get('actions', []))
+                definitions = {d['name']:d for d in session.definitions()}
+                self.assertIn('bring_home', definitions['use_held_object']['parameters']['properties']['action']['enum'])
+                self.assertNotIn('bring_home', session.menu)
                 documentation = tool_documentation(session.definitions())
                 self.assertIn('No separate movement or put-down call is needed', documentation)
                 self.assertNotIn('BringFoodHome', documentation)

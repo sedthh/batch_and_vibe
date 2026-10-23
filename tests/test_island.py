@@ -188,7 +188,7 @@ class IslandProjectionTests(TestCase):
         obs=playable(island=island,surroundings=surroundings)
         preview=preview_prompt(obs,None)
         compact=model_turn({'snapshot':summarize_context(json.loads(preview.context_json),asdict(obs))})['snapshot']
-        self.assertTrue(compact['surroundings_also_near_god_hand'])
+        self.assertTrue(compact['shared_surroundings'])
         self.assertEqual(compact['surroundings']['other_creature_details'][0]['owner_god_id'],'god_1')
         f=frame();f['observation']=asdict(obs);f['prompt']['context']=json.loads(preview.context_json)
         session=DirectCreatureToolSession(lambda:f)
