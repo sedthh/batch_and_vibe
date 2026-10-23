@@ -157,7 +157,7 @@ class SimplifiedToolsTests(unittest.TestCase):
         self.assertEqual(detailed['self']['body'], snapshot['self']['body'])
         self.assertEqual(detailed['self']['motivations']['hunger_motivation'], snapshot['self']['motivations']['hunger_motivation'])
         self.assertEqual(detailed['self']['held_object'], snapshot['self']['held_object'])
-        self.assertEqual(detailed['self']['learning']['learning_threshold_met'], ['water'])
+        self.assertEqual(detailed['self']['learning']['learned'], ['water'])
         self.assertEqual(detailed['activity'], snapshot['activity'])
         self.assertNotIn('holding_and_motivations', detailed)
         self.assertNotIn('native_activity', detailed)

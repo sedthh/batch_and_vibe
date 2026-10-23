@@ -19,6 +19,54 @@ from test_world_actions import WorldHarness
 
 
 class ModelProjectionTests(unittest.TestCase):
+    def test_short_labels_preserve_meaning_and_do_not_rewrite_text_or_raw_readings(self):
+        literal = 'time_delta_since_last_message_seconds, learning_threshold_met 🐾'
+        raw = {'time_delta_since_last_message_seconds': 45, 'god_question': literal,
+               'snapshot': {'self': {'learning': {'learning_threshold_met': ['water'],
+                                                 'partially_learned': ['forest']}},
+                            'surroundings_near_god_hand': {'trees_nearby': 2},
+                            'surroundings_also_near_god_hand': False},
+               'capabilities': {'miracle_attempts': {'learning_threshold_met': ['water'],
+                   'still_learning_may_fail': ['forest'], 'learning_unverified': ['food']}}}
+        original = deepcopy(raw)
+        result = model_turn(raw)
+        self.assertEqual(result['elapsed_seconds'], 45)
+        self.assertEqual(result['god_question'], literal)
+        self.assertEqual(result['snapshot'], {'self': {'learning': {'learned': ['water'], 'partial': ['forest']}},
+                         'hand_surroundings': {'trees': 2}, 'shared_surroundings': False})
+        self.assertEqual(result['capabilities']['miracle_attempts'],
+                         {'learned': ['water'], 'learning': ['forest'], 'unknown': ['food']})
+        # Detailed miracle knowledge uses the same label, while keeping its boolean value.
+        self.assertEqual(model_objects({'spell': 'water', 'learning_threshold_met': False}),
+                         {'spell': 'water', 'learned': False})
+        self.assertEqual(model_turn(result), result)
+        self.assertEqual(raw, original)
+
+    def test_short_labels_preserve_removals_in_previously_compacted_history(self):
+        from bwv.request_compaction import compact_messages, compact_json
+        from test_request_compaction import decoded_observations
+        first = {'message_type': 'world_observation',
+                 'snapshot': {'self': {'learning': {'learning_threshold_met': ['water'],
+                                                  'partially_learned': ['forest']}},
+                              'surroundings_near_god_hand': {'trees': 2},
+                              'surroundings_also_near_god_hand': False,
+                              'events': {'description': 'Synthetic observation. ' * 40}}}
+        second = deepcopy(first)
+        second['snapshot'].pop('surroundings_near_god_hand')
+        second['snapshot'].pop('surroundings_also_near_god_hand')
+        second['snapshot']['self']['learning'].pop('partially_learned')
+        values = [first, second, {'snapshot': {}}]
+        wire = compact_messages([{'role': 'user', 'content': compact_json(value)} for value in values])
+        self.assertIn('snapshot_removed', json.loads(wire[1]['content']))
+        projected = [{'role': 'user', 'content': compact_json(model_turn(json.loads(message['content'])))}
+                     for message in wire]
+        result = compact_messages(projected)
+        self.assertEqual(decoded_observations(result), [model_turn(value) for value in values])
+        for _ in range(20):
+            rebuilt = compact_messages([{'role': 'user', 'content': compact_json(model_turn(json.loads(m['content'])))}
+                                        for m in result])
+            self.assertEqual(rebuilt, result)
+
     def test_bubble_metadata_survives_preview_tools_and_history_projection(self):
         from test_held_miracle import HeldMiracleHarness
         h=HeldMiracleHarness();h.probe['held_miracle']['bubble_spell']=23
@@ -62,8 +110,8 @@ class ModelProjectionTests(unittest.TestCase):
         expected={'surroundings':{'people':3,'trees':8,'other_creatures':2,
                 'other_creature_details':[{'object_id':'lion','type':'lion creature','damage':10}],
                 'burning_objects':{'tree':1}},
-             'surroundings_near_god_hand':{'houses':4,'miracle_bubbles':1},
-             'towns_nearby':[{'town_id':'town'}], 'surroundings_also_near_god_hand':False}
+             'hand_surroundings':{'houses':4,'miracle_bubbles':1},
+             'towns_nearby':[{'town_id':'town'}], 'shared_surroundings':False}
         self.assertEqual(model_snapshot(raw),expected)
         self.assertEqual(model_snapshot(expected),expected)
         self.assertEqual(raw,original)
@@ -92,7 +140,7 @@ class ModelProjectionTests(unittest.TestCase):
         self.assertEqual(value['snapshot']['god_hand']['alignment'],0)
         self.assertEqual(value['snapshot']['god_hand']['distance'],5)
         self.assertNotIn('time',value);self.assertNotIn('conversation_only',value)
-        self.assertEqual(value['time_delta_since_last_message_seconds'],45)
+        self.assertEqual(value['elapsed_seconds'],45)
         self.assertEqual(raw,original)
         self.assertEqual(model_objects({'hunger_desire':0}),{'hunger_motivation':0})
         self.assertEqual(model_turn(value),value)

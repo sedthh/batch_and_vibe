@@ -5,17 +5,30 @@ import json
 import math
 
 from .world_actions import WORLD_KINDS
+from .snapshot_compaction import compact_snapshot
+
+
+PUBLIC_FIELD_NAMES = {
+    'time_delta_since_last_message_seconds': 'elapsed_seconds',
+    'surroundings_near_god_hand': 'hand_surroundings',
+    'surroundings_also_near_god_hand': 'shared_surroundings',
+    'learning_threshold_met': 'learned',
+    'partially_learned': 'partial',
+    'still_learning_may_fail': 'learning',
+    'learning_unverified': 'unknown',
+}
 
 
 def field_name(key, *, context=None, value=None):
-    if context in ('surroundings', 'surroundings_near_god_hand'):
+    if context in ('surroundings', 'surroundings_near_god_hand', 'hand_surroundings'):
         # Keep the count and the optional individual creature profiles distinct.
         if key == 'other_creatures' and isinstance(value, (list, tuple)):
             return 'other_creature_details'
         key = key.removesuffix('_nearby')
     if key in ('hunger_motivation_engine_units', 'hunger_desire'):
         return 'hunger_motivation'
-    return key.removesuffix('_engine_units')
+    key = key.removesuffix('_engine_units')
+    return PUBLIC_FIELD_NAMES.get(key, key)
 
 
 def creature_condition(result):
@@ -100,6 +113,11 @@ def group_self(value):
 def model_turn(value):
     """Transport timestamps and planner flags are diagnostic data, not context."""
     result = deepcopy(value)
+    # Reprojecting an older wire request must rename removal paths as well as
+    # dictionary keys, or historical fields can survive under their new names.
+    if isinstance(result, dict) and isinstance(result.get('snapshot_removed'), list):
+        result['snapshot_removed'] = [[PUBLIC_FIELD_NAMES.get(key, key) for key in path]
+                                      for path in result['snapshot_removed']]
     if isinstance(result, dict) and isinstance(result.get('snapshot'), dict):
         result['message_type'] = 'god_question' if result.get('god_question') else 'world_observation'
         result.pop('time', None)
@@ -121,6 +139,8 @@ def model_turn(value):
     result = model_objects(result)
     if isinstance(result, dict) and isinstance(result.get('snapshot'), dict) and 'self' in result['snapshot']:
         result['snapshot']['self'] = group_self(result['snapshot']['self'])
+    if isinstance(result, dict) and isinstance(result.get('snapshot'), dict):
+        compact_snapshot(result['snapshot'])
     return result
 
 

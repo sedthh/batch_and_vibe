@@ -174,8 +174,8 @@ class GodHandProjectionTests(TestCase):
             compact['god_hand'].update(target_id='god_hand',distance_engine_units=10,position={'x':1,'z':2})
             compact['world']={'god_alignment':.5}
             projected=model_turn({'snapshot':compact})['snapshot']
-            self.assertTrue(projected['surroundings_also_near_god_hand'])
-            self.assertNotIn('surroundings_near_god_hand',projected)
+            self.assertTrue(projected['shared_surroundings'])
+            self.assertNotIn('hand_surroundings',projected)
             self.assertEqual(projected['god_hand']['contents'],hand.contents)
             self.assertEqual(projected['god_hand']['alignment'],.5)
             self.assertEqual(projected['god_hand']['target_id'],'god_hand')

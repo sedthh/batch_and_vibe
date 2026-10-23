@@ -156,6 +156,43 @@ class HistoryCompactionTests(unittest.TestCase):
 
 
 class RequestCompactionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_landmarks_survive_repeated_provider_history_rebuilding(self):
+        from test_snapshot_compaction import scene, expanded
+        for api in ('responses', 'chat_completions'):
+            session, _, request = bound(WorldHarness())
+            history = []
+            expected = []
+            for index in range(4):
+                snapshot = scene()
+                snapshot['self']['body']['tiredness'] = index
+                snapshot['events']['action_results'][0]['event_id'] = f'event-{index}'
+                expected.append(snapshot)
+                history.append({'role':'user', 'content':compact_json({'snapshot':snapshot})})
+            current = deepcopy(request.current)
+            current['snapshot'].update(expected[-1])
+            history[-1]['content'] = compact_json(current)
+            request = replace(request, current=current,
+                messages=tuple([{'role':'system','content':'Synthetic rules'}, *history]))
+            original = deepcopy(request)
+            provider = LLMProvider(LLMConfig('synthetic', api=api),
+                environ={'OPENAI_API_KEY':'synthetic'},
+                transport=httpx.MockTransport(lambda _:self.fail('No API call expected')))
+            try:
+                first = None
+                for _ in range(20):
+                    projected = session.project_request(request)
+                    _, messages = provider._body(projected)
+                    if first is None:first = deepcopy(messages)
+                    self.assertEqual(messages, first)
+                    self.assertEqual([expanded(value['snapshot']) for value in decoded_observations(messages)],
+                                     expected)
+                    self.assertNotIn('snapshot_changes', json.loads(messages[-1]['content']))
+                    request = replace(projected, messages=tuple(messages))
+                self.assertEqual(original.current, current)
+                self.assertEqual(provider.calls, 0)
+            finally:
+                await provider.close()
+
     async def test_repeated_full_assembly_has_one_copy_of_each_generated_block(self):
         session, _, request = bound(WorldHarness())
         general = '## Custom\nLiteral {x} $value C:\\folder 🐾\n\n'+TOOL_CONTRACT

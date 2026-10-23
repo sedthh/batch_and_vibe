@@ -271,9 +271,11 @@ class DirectToolsTests(unittest.TestCase):
         projected=s.project_request(request)
         self.assertNotIn(ACTION_CONTRACT,projected.messages[0]['content'])
         self.assertNotIn(REPLY_FORMAT,projected.messages[0]['content'])
-        self.assertIn('cast_miracle',projected.current['capabilities']['actions'])
-        self.assertIn('food',projected.current['capabilities']['miracle_attempts'])
-        self.assertNotIn('made_up',projected.current['capabilities']['miracle_attempts'])
+        definitions={d['name']:d for d in s.definitions()}
+        self.assertIn('cast_miracle',definitions['do_action']['parameters']['properties']['action']['enum'])
+        attempts=[spell for group in projected.current['capabilities']['miracle_attempts'].values() for spell in group]
+        self.assertIn('food',attempts)
+        self.assertNotIn('made_up',attempts)
 
     def test_offered_attempt_does_not_imply_learned_and_aliases_match_sensors(self):
         from bwv.direct_tools import observed_spell_name
@@ -285,9 +287,9 @@ class DirectToolsTests(unittest.TestCase):
         result=s.project_request(request).current
         self.assertNotIn('castable_miracles',result)
         self.assertEqual(result['capabilities']['miracle_attempts'],{
-            'forest':'still_learning_may_fail','water':'learning_threshold_met',
-            'megablast_pu2':'still_learning_may_fail','spiritual_shield':'learning_threshold_met',
-            'creature_nice':'learning_threshold_met','food':'learning_unverified'})
+            'learning':['forest','megablast_pu2'],
+            'learned':['water','spiritual_shield','creature_nice'],
+            'unknown':['food']})
         self.assertEqual(observed_spell_name('fireball_pu1'),'fireball_power_up_1')
         self.assertEqual(observed_spell_name('heal_pu1'),'heal_power_up_1')
 
