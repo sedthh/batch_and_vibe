@@ -48,6 +48,7 @@ def save_basics(path, values, key='', *, voice_key=''):
         data['prompts'] = {'general': values['general_prompt']}
     if 'reenable_cut_content' in values:
         data['reenable_cut_content'] = values['reenable_cut_content']
+    if 'vr_mode' in values:data['vr_mode']=values['vr_mode']
     from .voice_settings_ui import voice_form_values
     data['voice'].update(voice_form_values(values))
     for field in ('model', 'api', 'base_url', 'output_format', 'token_parameter'):
@@ -115,7 +116,7 @@ def save_basics(path, values, key='', *, voice_key=''):
 
 
 class SettingsWindow:
-    def __init__(self, path, parent=None, *, on_saved=None):
+    def __init__(self, path, parent=None, *, on_saved=None, game_root=None):
         import tkinter as tk
         from tkinter import ttk
         from tkinter.scrolledtext import ScrolledText
@@ -136,6 +137,30 @@ class SettingsWindow:
         chat_limits.pack(fill='x')
         from .voice_settings_ui import VoiceTab
         self.voice_tab = VoiceTab(tabs, config['voice'], self.values, limits_panel=limits)
+        vr_panel=ttk.Frame(tabs,padding=12);tabs.add(vr_panel,text='VR')
+        self.vr_status=tk.StringVar()
+        ttk.Label(vr_panel,textvariable=self.vr_status,wraplength=570).pack(anchor='w',pady=(4,0))
+        def refresh_vr(*_):
+            from .vr_install import configured_folder,installation_error
+            error=installation_error(configured_folder(self.path,game_root))
+            self.vr_status.set((error+'\nInstall BW1-VR in the selected game folder to enable the VR launch button.')
+                if error else 'BW1-VR detected. Use Run B&W VR in the start window, then Play in VR.')
+        refresh_vr()
+        ttk.Button(vr_panel,text='Check again',command=refresh_vr).pack(anchor='w',pady=(6,14))
+        ttk.Label(vr_panel,text='Enable voice in Voice settings. Use Push to talk with your chosen shortcut,\n'
+            'or turn it off for voice activation. VR leaves your choices unchanged.',wraplength=570).pack(anchor='w',pady=(0,8))
+        voice_status=tk.StringVar()
+        def refresh_voice_status(*_):
+            voice='Voice input is disabled.' if not self.values['voice_enabled'].get() else (
+                'Voice input needs a speech model.' if not self.values['voice_model'].get().strip() else 'Voice input is enabled.')
+            push_to_talk=('Push to talk: on ('+self.values['voice_hotkey'].get()+').' if self.values['voice_push_to_talk'].get()
+                else 'Push to talk: off (voice activation).')
+            voice_status.set(voice+'\n'+push_to_talk)
+        for name in ('voice_enabled','voice_model','voice_push_to_talk','voice_hotkey'):
+            self.values[name].trace_add('write',refresh_voice_status)
+        refresh_voice_status()
+        ttk.Label(vr_panel,textvariable=voice_status).pack(anchor='w',pady=(0,4))
+        ttk.Button(vr_panel,text='Voice settings',command=lambda:tabs.select(1)).pack(anchor='w')
         tabs.add(limits, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
         prompt = ttk.Frame(tabs, padding=12); tabs.add(prompt, text='General prompt')
@@ -285,7 +310,7 @@ class StatusWindow:
                     self.settings_window.root.lift()
                 else:
                     self.settings_window = SettingsWindow(path, self.root,
-                        on_saved=self.apply_settings)
+                        on_saved=self.apply_settings,game_root=self.game_launcher.root if self.game_launcher is not None else None)
             except (ValueError, OSError) as error:
                 self.write(f'ERROR: Cannot open settings: {error}')
 
@@ -324,6 +349,10 @@ class StatusWindow:
         for button in (self.settings_button, self.cut_content_toggle):
             button.configure(state='disabled' if restarting else 'normal')
         self.refresh_game_buttons()
+
+        if not restarting and getattr(self,'pending_game_mode',None) is not None:
+            mode=self.pending_game_mode;self.pending_game_mode=None
+            self.start_game(mode)
 
     def set_debug_session(self, session):
         import asyncio
@@ -403,17 +432,22 @@ class StatusWindow:
         from tkinter import ttk
         from .game_display import RESOLUTIONS
         self.game_launcher=launcher
-        self.root.geometry('760x420')
+        self.root.geometry('780x500')
+        self.desktop_controls=ttk.Frame(self.game_controls)
+        self.desktop_controls.pack(fill='x')
         self.size=tk.StringVar(value=self.load_display_size())
         self.size.trace_add('write',self.remember_display_size)
-        ttk.Combobox(self.game_controls,textvariable=self.size,values=RESOLUTIONS,
+        ttk.Combobox(self.desktop_controls,textvariable=self.size,values=RESOLUTIONS,
                      state='readonly',width=12).pack(side='left',padx=(0,8))
         def start(mode):
             self.start_game(mode)
         for label,mode in (('Run B&W windowed','windowed'),
                            ('Run B&W borderless fullscreen','borderless')):
-            button=ttk.Button(self.game_controls,text=label,command=lambda mode=mode:start(mode))
+            button=ttk.Button(self.desktop_controls,text=label,command=lambda mode=mode:start(mode))
             button.pack(side='left',padx=(0,8));self.game_buttons.append(button)
+        button=ttk.Button(self.desktop_controls,text='Run B&W VR',command=lambda:start('vr'))
+        button.pack(side='left',padx=(0,8));self.game_buttons.append(button)
+        self.vr_button=button
         self.refresh_game_buttons()
 
     def remember_cut_content(self):
@@ -461,10 +495,23 @@ class StatusWindow:
             self.write(f'ERROR: Could not remember the display size for next time. {error}')
 
     def start_game(self, mode):
-        if self.stopping:return
-        # Disable both before launch, including while configuring/spawning.
+        if self.stopping or getattr(self,'restarting',False):return
+        # Disable all buttons while configuring/spawning.
         for button in self.game_buttons:button.configure(state='disabled')
         try:
+            if self.game_launcher.busy:raise ValueError('Black & White is already running or starting.')
+            if mode=='vr' and self.game_launcher.vr_installation_error:
+                raise ValueError('BW1-VR is unavailable. See Settings > VR for installation details.')
+            if self.game_launcher.vr_mode != (mode=='vr'):
+                config=replace(LLMConfig.load(self.settings_path),vr_mode=mode=='vr')
+                if self.restart is None:raise ValueError('Restart the mod to change launch mode.')
+                config.save(self.settings_path)
+                self.pending_game_mode=mode
+                try:self.apply_settings(config)
+                except Exception:
+                    self.pending_game_mode=None
+                    raise
+                return
             self.write(self.game_launcher.start(mode,self.size.get(),self.root.winfo_id()))
         except (OSError,ValueError,RuntimeError) as error:
             self.write('ERROR: '+str(error))
@@ -482,6 +529,8 @@ class StatusWindow:
                   or self.game_launcher is None or self.game_launcher.busy)
         for button in self.game_buttons:
             button.configure(state='disabled' if disabled else 'normal')
+        if hasattr(self,'vr_button') and self.game_launcher.vr_installation_error:
+            self.vr_button.configure(state='disabled')
 
     def write(self, text, **kwargs):
         self.log.configure(state='normal')

@@ -24,7 +24,7 @@ def voice_form_values(values):
     for name in VoiceSettings.__dataclass_fields__:
         if 'voice_' + name not in values: continue
         value = values['voice_' + name]
-        if name in ('enabled', 'auto_send'):
+        if name in ('enabled', 'auto_send', 'push_to_talk'):
             if type(value) is not bool: raise ValueError('Invalid voice checkbox value.')
         elif name in ('max_recording_seconds', 'timeout_seconds'):
             try: value = int(value)
@@ -60,6 +60,7 @@ class VoiceTab:
         from tkinter import ttk
         panel = ttk.Frame(tabs, padding=12); tabs.add(panel, text='Voice')
         self.key = tk.StringVar()
+        self.values=values
         for name, value in config.items():
             variable = tk.BooleanVar if type(value) is bool else tk.StringVar
             values['voice_' + name] = variable(value='' if value is None else value)
@@ -73,7 +74,7 @@ class VoiceTab:
             widget.grid(row=row, column=1, sticky='ew', pady=3)
             return widget
 
-        ttk.Checkbutton(panel, text='Enable push-to-talk', variable=values['voice_enabled']).grid(
+        ttk.Checkbutton(panel, text='Enable voice', variable=values['voice_enabled']).grid(
             row=0, column=0, columnspan=2, sticky='w')
         preset = tk.StringVar(value='Choose a preset')
         controls = ttk.Frame(panel); controls.grid(row=1, column=0, columnspan=2, sticky='ew', pady=6)
@@ -88,7 +89,13 @@ class VoiceTab:
         ttk.Label(panel, text='Voice API key (blank keeps saved key)').grid(row=row, column=0, sticky='w', pady=3)
         key_entry = ttk.Entry(panel, textvariable=self.key, show='*', width=36)
         key_entry.grid(row=row, column=1, sticky='ew'); api_fields.append(key_entry)
-        field('hotkey', 'Hold to speak; release to transcribe', tuple(HOTKEYS))
+        self.push_to_talk=tk.BooleanVar()
+        self.push_to_talk_toggle=ttk.Checkbutton(panel,text='Push to talk (off = voice activation)',
+            variable=self.push_to_talk,command=lambda:values['voice_push_to_talk'].set(self.push_to_talk.get()))
+        self.push_to_talk_toggle.grid(row=panel.grid_size()[1],column=0,columnspan=2,sticky='w',pady=3)
+        self.hotkey=field('hotkey', 'Hold to speak; release to transcribe', tuple(HOTKEYS))
+        values['voice_push_to_talk'].trace_add('write',self.refresh_input_mode)
+        self.refresh_input_mode()
         field('language', 'Language code (blank = auto, en = English)')
         row = panel.grid_size()[1]
         ttk.Label(panel, text='Microphone (blank = Windows default)').grid(row=row, column=0, sticky='w', pady=3)
@@ -125,3 +132,9 @@ class VoiceTab:
             'See docs/usage.md. Saving applies changes without a game restart.',
             wraplength=570).grid(row=panel.grid_size()[1], column=0, columnspan=2, sticky='w', pady=(6, 0))
         ttk.Label(panel, textvariable=status, wraplength=570).grid(row=panel.grid_size()[1], column=0, columnspan=2, sticky='w')
+
+    def refresh_input_mode(self,*_):
+        enabled=self.values['voice_push_to_talk'].get()
+        self.push_to_talk.set(enabled)
+        self.push_to_talk_toggle.configure(state='normal')
+        self.hotkey.configure(state='readonly')

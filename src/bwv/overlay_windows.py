@@ -132,12 +132,21 @@ def hotkey_loop(user32, stop, wanted, emit):
 
 
 class OverlayWindow:
-    def __init__(self, client, *, seconds=43200, diagnostics_file=None, settings_path=None):
+    def __init__(self, client, *, seconds=43200, diagnostics_file=None, settings_path=None, vr=False):
         import tkinter as tk
         if type(seconds) is not int or not 1<=seconds<=43200:
             raise ValueError('Invalid overlay duration')
         from .overlay import ChatInputHistory
         self.win=Windows();self.client=client;self.model=OverlayModel()
+        self.vr=vr
+        self.native_fullscreen=False
+        self.vr_display=None
+        self.captions=None
+        if vr:
+            from .game_display import DisplayWindows
+            self.vr_display=DisplayWindows()
+            from .vr import CaptionMirror
+            self.captions=CaptionMirror()
         self.input_history=ChatInputHistory()
         self.stop=threading.Event();self.events=queue.SimpleQueue()
         self.want_hotkey=threading.Event();self.hotkey_events=0
@@ -197,11 +206,15 @@ class OverlayWindow:
             from .llm import LLMConfig
             from .voice_overlay import VoiceOverlay, VoiceInputMeter
             voice = LLMConfig.load(settings_path).voice
+            if vr:
+                from .vr import voice_settings
+                voice=voice_settings(voice)
             if voice.input_enabled:
                 self.voice = VoiceOverlay(self, voice, settings_path)
                 self.voice_meter = VoiceInputMeter(self.input_box, font)
-                binding = {'F11': '<F11>', 'Ctrl+F11': '<Control-F11>'}[voice.hotkey]
-                self.entry.bind(binding, lambda event: 'break')
+                if voice.push_to_talk:
+                    binding = {'F11': '<F11>', 'Ctrl+F11': '<Control-F11>'}[voice.hotkey]
+                    self.entry.bind(binding, lambda event: 'break')
         self.win.own_style(self.hwnd,False)
         self.hotkey_thread=threading.Thread(target=hotkey_loop,
             args=(self.win.u,self.stop,self.want_hotkey,self.emit),daemon=True)
@@ -219,7 +232,16 @@ class OverlayWindow:
 
     def poll_service(self):
         while not self.stop.is_set():
-            try:self.emit('state',self.client.state())
+            try:
+                payload=self.client.state()
+                self.emit('state',payload)
+                if self.captions is not None:
+                    try:
+                        previous=self.captions.status
+                        self.captions.update(payload)
+                        if self.captions.status!=previous and self.captions.status in ('bridge_update_required','rejected'):
+                            self.emit('vr_error','VR subtitles unavailable; check the installed bridge and desktop chat.')
+                    except (OSError,ValueError,KeyError):self.emit('vr_error','VR subtitle delivery failed; see the desktop chat.')
             except (OSError,ValueError,KeyError,EOFError):self.emit('disconnected',None)
             self.stop.wait(.4)
 
@@ -234,6 +256,7 @@ class OverlayWindow:
 
     def open_input(self, *, focus=True):
         """Show the shared draft; automatic voice sending keeps focus in the game."""
+        if getattr(self,'native_fullscreen',False):return
         if not self.model.can_show():return
         if self.win.u.GetForegroundWindow() not in (self.game,self.hwnd):return
         self.expanded=True
@@ -301,6 +324,11 @@ class OverlayWindow:
         return 'break'
 
     def render(self):
+        if getattr(self,'native_fullscreen',False):
+            self.win.own_style(self.hwnd,False)
+            self.hide_window()
+            self.diagnostics(False)
+            return
         if not self.model.can_show():
             focused=self.win.u.GetForegroundWindow()==self.hwnd
             # Keep the draft and open-input intent across a scene lock.
@@ -332,7 +360,7 @@ class OverlayWindow:
         elif not reply:
             self.reply_reveal.clear()
         title='Chat Ctrl+Enter'
-        if voice:title += '   -   Voice '+voice.config.hotkey
+        if voice:title += '   -   Voice '+('activation' if voice.automatic else voice.config.hotkey)
         if self.model.is_dummy:
             title += ' · Dummy'
         if self.hotkey_failed:title='Ctrl+Enter is already in use'
@@ -411,7 +439,15 @@ class OverlayWindow:
 
     def diagnostics(self, visible):
         if not self.diagnostics_file:return
+        voice=getattr(self,'voice',None)
+        captions=getattr(self,'captions',None)
         status={'game_pid':self.model.game_pid,'game_window':self.game,'overlay_window':self.hwnd,
+            'native_fullscreen':getattr(self,'native_fullscreen',False),
+            'vr_caption_status':captions.status if captions else None,
+            'voice_enabled':voice is not None,
+            'voice_automatic':voice.automatic if voice else None,
+            'voice_active':voice.active if voice else False,
+            'voice_status':voice.status if voice else '',
             'visible':visible,'expanded':self.expanded,'hotkey_registered':self.hotkey,
             'hotkey_conflict':self.hotkey_failed,'geometry':self.geometry,
             'hotkey_events':self.hotkey_events,
@@ -444,6 +480,8 @@ class OverlayWindow:
                 self.close();return
             elif kind=='hotkey_state':
                 self.hotkey,self.hotkey_failed=value
+            elif kind=='vr_error':
+                self.notice='['+value+']'
             elif kind=='toggle':
                 self.hotkey_events+=1
                 self.toggle()
@@ -483,6 +521,9 @@ class OverlayWindow:
         self.advance_submission()
         if not self.game or self.win.pid(self.game)!=self.model.game_pid or not self.win.rect(self.game):
             self.game=self.win.game_window(self.model.game_pid)
+        if getattr(self,'vr_display',None) is not None:
+            try:self.native_fullscreen=self.vr_display.mode(self.model.game_pid)=='fullscreen'
+            except (OSError,ValueError):self.native_fullscreen=True
         if getattr(self,'voice',None):self.voice.tick()
         if self.expanded and self.model.can_send() and self.win.u.GetForegroundWindow() not in (0,self.game,self.hwnd):
             self.expanded=False;self.win.own_style(self.hwnd,False)
@@ -506,8 +547,8 @@ def parent_shutdown(stream, emit):
         emit('shutdown', None)
 
 
-def run_window(client, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False, settings_path=None):
-    window=OverlayWindow(client,seconds=seconds,diagnostics_file=diagnostics_file,settings_path=settings_path)
+def run_window(client, *, seconds=43200, diagnostics_file=None, stop_on_stdin=False, settings_path=None, vr=False):
+    window=OverlayWindow(client,seconds=seconds,diagnostics_file=diagnostics_file,settings_path=settings_path,vr=vr)
     if stop_on_stdin:
         threading.Thread(target=parent_shutdown,args=(sys.stdin,window.emit),daemon=True).start()
     try:window.root.mainloop()

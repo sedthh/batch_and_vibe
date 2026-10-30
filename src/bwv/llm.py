@@ -51,6 +51,7 @@ class LLMConfig:
     history_chars: int = 24000
     wake_on_question: bool = False
     reenable_cut_content: bool = True
+    vr_mode: bool = False
     prompts: PromptSettings = field(default_factory=PromptSettings)
     voice: VoiceSettings = field(default_factory=VoiceSettings)
 
@@ -63,6 +64,8 @@ class LLMConfig:
             raise ValueError('wake_on_question must be a boolean')
         if type(self.reenable_cut_content) is not bool:
             raise ValueError('reenable_cut_content must be a boolean')
+        if type(self.vr_mode) is not bool:
+            raise ValueError('VR mode must be a boolean')
         if isinstance(self.prompts,dict):
             object.__setattr__(self,'prompts',PromptSettings.parse(self.prompts))
         if not isinstance(self.prompts,PromptSettings):
@@ -132,6 +135,9 @@ class LLMConfig:
         raw=stream.read(128*1024+1)
         if len(raw)>128*1024:raise ValueError()
         data=json.loads(raw)
+        if type(data) is dict:
+            # Earlier experimental settings had a separate VR installation.
+            data.pop('vr_game_folder',None)
         if type(data) is dict and 'max_requests' in data:
             # Preserve existing configured budgets while migrating to turn units.
             legacy=data.pop('max_requests')

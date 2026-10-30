@@ -1,5 +1,10 @@
 # Using Black & White LLM Creature Mod
 
+For VR support, see [experimental BW1-VR compatibility](vr.md).
+Use **Run B&W VR**, the third button in our start window. Missing installation
+files disable that button; **Model, API key & settings > VR** explains what is
+missing. `--vr` also enables native subtitles. Voice settings remain your choice.
+
 Requires Windows, Python 3.11+ with tkinter, and your own Black & White installation.
 The mod supports the verified 1.42 engine layout; some unofficial patches are not
 compatible. No game files are included.
@@ -72,15 +77,23 @@ scene control take precedence. Other objects can still move or disappear.
 The launcher has **Run B&W windowed** with a size dropdown, and **Run B&W borderless
 fullscreen** using the monitor containing the launcher. Borderless is a windowed
 game with its frame removed, not native exclusive fullscreen. Launching from the elevated mod inherits administrator
-access. Close the game before changing modes. These buttons save only the game's
-windowed/fullscreen flag and display width/height; other settings and saves are untouched.
-New model calls, including tool follow-ups, pause in unsupported fullscreen mode,
+access. Close the game before changing modes. All launch buttons set the game's
+registry `GameDir` to the selected installation, so the cached save root points
+to that folder. A failed launch restores the previous value. The desktop buttons
+also save the windowed/fullscreen flag and display width/height. When BW1-VR is installed, they
+also temporarily select its desktop backend and restore its previous launch settings
+afterward; see [VR compatibility](vr.md). Saves are untouched.
+New model calls, including tool follow-ups, pause in unsupported desktop fullscreen mode,
 when the game window is minimized/unavailable, or if the overlay process exits.
 Already-sent requests cannot be un-sent. Windowed mode resumes with fresh observations.
 
 ## Voice input
 
-Open **Model, API key & settings → Voice**, enable push-to-talk, and choose a preset:
+Open **Model, API key & settings → Voice**, enable voice, and choose a preset.
+**Push to talk** is checked by default; uncheck it to use voice activation.
+VR mode leaves this control and your transcript sending preference unchanged.
+
+Available presets:
 
 - **Local Whisper:** speech stays on your computer. From the repository folder,
   install the optional model runtime once:
@@ -123,7 +136,9 @@ leaving the game window or entering a menu also cancels an unfinished recording
 or transcription. Finish or clear a typed draft before recording. The default
 recording limit is 60 seconds; reaching it stops recording and transcribes the clip.
 
-Only a key press opens the microphone. Audio stays in memory and is discarded after
+With push-to-talk enabled, a key press opens the microphone. With it off, voice
+activation listens while chat is available and the game is focused.
+Audio stays in memory and is discarded after
 transcription; the mod does not save recordings. API mode sends that recording to
 your chosen speech provider and may cost money, **even with dummy chat enabled**.
 

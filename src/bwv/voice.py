@@ -27,6 +27,7 @@ class VoiceSettings:
     api_key_env: str | None = 'OPENAI_API_KEY'
     language: str = ''
     hotkey: str = 'F11'
+    push_to_talk: bool = True
     auto_send: bool = True
     microphone: str = ''
     max_recording_seconds: int = 60
@@ -35,8 +36,8 @@ class VoiceSettings:
     max_audio_minutes: float | None = None
 
     def __post_init__(self):
-        if type(self.enabled) is not bool or type(self.auto_send) is not bool:
-            raise ValueError('Voice enabled and auto-send must be booleans.')
+        if any(type(value) is not bool for value in (self.enabled,self.auto_send,self.push_to_talk)):
+            raise ValueError('Voice enabled, auto-send and push-to-talk must be booleans.')
         if self.provider not in ('local', 'api'):
             raise ValueError('Voice provider must be local or api.')
         if not isinstance(self.model, str) or len(self.model) > 512:
@@ -95,12 +96,16 @@ class VoiceError(ValueError):
     """Only authored, user-readable messages may cross the UI boundary."""
 
 
+class NoSpeechError(VoiceError):
+    """A completed transcription contained no speech, rather than a service failure."""
+
+
 def transcript_text(text):
     if not isinstance(text, str):
         raise VoiceError('The transcription service returned an unreadable reply.')
     text = ' '.join(text.split())
     if not text:
-        raise VoiceError('No speech recognized. Hold the voice shortcut and try again.')
+        raise NoSpeechError('No speech recognized. Please speak clearly and try again.')
     if len(text) > 2000:
         raise VoiceError('That transcript is too long for chat. Please use a shorter recording.')
     if any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in text):
@@ -360,6 +365,7 @@ class VoiceInput:
                     lambda: self.emit('voice_status', (job, 'Listening')),
                     on_level=lambda level: setattr(job, 'level', level))
                 if job.cancelled.is_set(): return
+                if not audio:return  # Voice activation heard no complete phrase.
                 if self.diagnostics.enabled:
                     from .voice_diagnostics import audio_summary
                     try: self.details['audio'] = audio_summary(audio)
@@ -371,6 +377,9 @@ class VoiceInput:
                 if self.diagnostics.enabled:
                     self.details.update(transcript=text, transcription_seconds=round(time.monotonic()-transcribing, 3))
                 if not job.cancelled.is_set(): self.emit('voice_text', (job, text))
+            except NoSpeechError as error:
+                if self.diagnostics.enabled:self.details['error']=str(error)
+                if not job.cancelled.is_set():self.emit('voice_empty',(job,str(error)))
             except VoiceError as error:
                 if self.diagnostics.enabled: self.details['error'] = str(error)
                 if not job.cancelled.is_set(): self.emit('voice_error', (job, str(error)))

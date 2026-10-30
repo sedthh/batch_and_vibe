@@ -9,6 +9,16 @@ from bwv.game_display import DisplayMonitor, DisplayWindows, GameLauncher, WS_CA
 
 
 class DisplayTests(unittest.TestCase):
+    def test_native_subtitles_allow_fullscreen_but_still_require_game_and_worker(self):
+        now=[1];windows=Mock();windows.mode.return_value='fullscreen'
+        monitor=DisplayMonitor(windows,lambda:7,clock=lambda:now[0],native_subtitles=True)
+        self.assertIsNone(monitor.reason())
+        monitor.overlay_alive=lambda:False
+        self.assertEqual(monitor.reason(),'chat_overlay_unavailable')
+        monitor.overlay_alive=lambda:True
+        windows.mode.return_value='unavailable';now[0]+=1
+        self.assertEqual(monitor.reason(),'game_display_unavailable')
+
     def test_caption_and_our_borderless_marker_are_distinct_from_fullscreen(self):
         windows=DisplayWindows.__new__(DisplayWindows)
         windows.window=Mock(return_value=20)
@@ -51,12 +61,16 @@ class LaunchTests(unittest.TestCase):
         self.process=Mock(pid=7);self.process.poll.return_value=None
         self.spawn=Mock(return_value=self.process);self.configure=Mock(return_value={'fixture':1})
         self.restore=Mock();self.discover=Mock(return_value=[]);self.now=1
+        self.configure_directory=Mock(return_value=('old folder',1));self.restore_directory=Mock()
         self.launcher=GameLauncher(self.root,windows=self.windows,discover=self.discover,
-            spawn=self.spawn,configure=self.configure,restore=self.restore,clock=lambda:self.now)
+            spawn=self.spawn,configure=self.configure,restore=self.restore,clock=lambda:self.now,
+            configure_directory=self.configure_directory,restore_directory=self.restore_directory)
 
     def test_windowed_launch_uses_selected_install_cwd_and_size_without_shell(self):
         self.launcher.start('windowed','800x600')
         self.configure.assert_called_once_with(800,600)
+        self.configure_directory.assert_called_once_with(self.root)
+        self.restore_directory.assert_not_called()
         self.spawn.assert_called_once_with([str(self.root/'runblack.exe')],cwd=str(self.root))
         self.windows.window.return_value=20;self.windows.win.rect.return_value=(5,6,805,606)
         self.assertIn('running windowed',self.launcher.poll())
@@ -151,10 +165,18 @@ class LaunchTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'already running'):
             self.launcher.start('windowed','800x600')
         self.configure.assert_not_called();self.spawn.assert_not_called()
+        self.configure_directory.assert_not_called()
 
     def test_spawn_failure_restores_only_changed_display_settings(self):
         self.spawn.side_effect=OSError('fixture')
         with self.assertRaises(OSError):self.launcher.start('windowed','800x600')
+        self.restore.assert_called_once_with({'fixture':1})
+        self.restore_directory.assert_called_once_with(('old folder',1))
+
+    def test_failed_save_path_configuration_prevents_game_start(self):
+        self.configure_directory.side_effect=OSError('registry unavailable')
+        with self.assertRaises(OSError):self.launcher.start('windowed','800x600')
+        self.spawn.assert_not_called()
         self.restore.assert_called_once_with({'fixture':1})
 
     def test_startup_timeout_is_visible_and_never_kills_game(self):

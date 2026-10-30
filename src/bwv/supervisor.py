@@ -113,7 +113,7 @@ async def sync_cut_content(pid, frame, enabled, notices):
 
 
 async def play(root, settings, settings_path, *, dummy=False, actions=True, debug=False,
-               overlay=True, automatic=True, seconds=43200, port=0, emit=print, debug_session=None):
+               overlay=True, automatic=True, seconds=43200, port=0, emit=print, debug_session=None, vr=False):
     from .qa_live import serve
     if not actions:
         settings = replace(settings, wake_on_question=False)
@@ -125,7 +125,7 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
     overlay_process = None
     runtime_ref = []
     from .game_display import DisplayMonitor, DisplayWindows
-    display = DisplayMonitor(DisplayWindows(), lambda: supervisor.pid)
+    display = DisplayMonitor(DisplayWindows(), lambda: supervisor.pid,native_subtitles=vr)
     if overlay:display.overlay_alive=lambda: overlay_process is not None and overlay_process.poll() is None
 
     def ready(url, runtime):
@@ -137,13 +137,17 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
         emit('Creature actions enabled.' if actions else 'Diagnostic chat-only mode: creature actions disabled by --no-actions.', flush=True)
         emit('Automatic creature thinking enabled.' if automatic else 'Automatic creature thinking off; direct questions remain available.', flush=True)
         if overlay:
+            if vr:
+                emit('Experimental VR: replies use game subtitles. Start the game through its VR launcher. '
+                     'Configure voice input in Settings > Voice.', flush=True)
             if settings.voice.input_enabled:
-                emit('Voice input enabled: hold '+settings.voice.hotkey+'. '+
+                emit('Voice input enabled: '+('hold '+settings.voice.hotkey+'. ' if settings.voice.push_to_talk else 'automatic speech detection. ')+
                     ('Transcription runs locally.' if settings.voice.provider=='local' else
                      'Recordings use the configured transcription API, including in dummy mode.'), flush=True)
             try:
                 overlay_process = subprocess.Popen([sys.executable, '-m', 'bwv.cli', 'overlay', url,
-                    '--seconds', str(seconds), '--stop-on-stdin', '--settings', str(settings_path)], stdin=subprocess.PIPE,
+                    '--seconds', str(seconds), '--stop-on-stdin', '--settings', str(settings_path)]+(['--vr'] if vr else [])+
+                    (['--diagnostics-file',str(settings_path.parent/'.local'/'overlay-diagnostics.json')] if debug else []), stdin=subprocess.PIPE,
                     creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
             except OSError as error:
                 emit(f'ERROR: Could not start the chat overlay: {error}. Observer and chat remain available.', flush=True)

@@ -161,7 +161,7 @@ class LaunchButtonTests(unittest.TestCase):
     def test_both_buttons_disable_before_spawn_and_recover_after_exit_or_failure(self):
         window=StatusWindow.__new__(StatusWindow)
         window.stopping=False;window.root=Mock();window.size=Mock();window.write=Mock()
-        window.game_buttons=[Mock(),Mock()];window.game_launcher=Mock(busy=False,installation_error=None)
+        window.game_buttons=[Mock(),Mock()];window.game_launcher=Mock(busy=False,installation_error=None,vr_mode=False)
         def start(*args):
             for button in window.game_buttons:
                 self.assertEqual(button.configure.call_args.kwargs,{'state':'disabled'})

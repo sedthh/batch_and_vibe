@@ -33,6 +33,34 @@ def audio_clip(seconds=0.5, rate=16000):
 
 
 class SettingsTests(unittest.TestCase):
+    def test_push_to_talk_defaults_and_form_roundtrip(self):
+        self.assertTrue(VoiceSettings().push_to_talk)
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'settings.json';config=LLMConfig('fixture');config.save(path)
+            values=form(config);values['voice_push_to_talk']=False
+            saved=save_basics(path,values)
+            self.assertFalse(saved.voice.push_to_talk)
+            self.assertFalse(saved.voice.enabled)
+            self.assertEqual(LLMConfig.load(path),saved)
+            values['voice_push_to_talk']='false'
+            with self.assertRaises(ValueError):save_basics(path,values)
+
+    def test_push_to_talk_control_follows_player_preference(self):
+        import tkinter as tk
+        from bwv.voice_settings_ui import VoiceTab
+        tcl=tk.Tcl();tab=VoiceTab.__new__(VoiceTab)
+        tab.values={'voice_push_to_talk':tk.BooleanVar(tcl,value=True)}
+        tab.push_to_talk=tk.BooleanVar(tcl)
+        tab.push_to_talk_toggle=Mock();tab.hotkey=Mock()
+        for enabled in (True,False,True):
+            tab.values['voice_push_to_talk'].set(enabled);tab.refresh_input_mode()
+            self.assertEqual(tab.push_to_talk.get(),enabled)
+            tab.push_to_talk_toggle.configure.assert_called_with(state='normal')
+            tab.hotkey.configure.assert_called_with(state='readonly')
+        tab.values['voice_push_to_talk'].set(False);tab.refresh_input_mode()
+        self.assertFalse(tab.push_to_talk.get())
+        tab.hotkey.configure.assert_called_with(state='readonly')
+
     def test_old_settings_opt_out_and_sparse_voice_roundtrips(self):
         with TemporaryDirectory() as folder:
             path = Path(folder) / 'settings.json'
@@ -45,7 +73,7 @@ class SettingsTests(unittest.TestCase):
             self.assertEqual(LLMConfig.load(path).voice, config.voice)
 
     def test_voice_validation(self):
-        for kwargs in ({'enabled': 'yes'}, {'provider': 'other'}, {'hotkey': 'A'},
+        for kwargs in ({'enabled': 'yes'}, {'provider': 'other'}, {'hotkey': 'A'}, {'push_to_talk': 1},
                 {'model': None}, {'max_recording_seconds': 0}, {'max_recording_seconds': True},
                 {'timeout_seconds': float('nan')}, {'language': 'English'}, {'auto_send': 1},
                 {'max_requests': 0}, {'max_requests': True}, {'max_requests': 1.5},
@@ -449,6 +477,15 @@ class CaptureTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_empty_transcript_is_distinct_from_provider_failure(self):
+        from bwv.voice import NoSpeechError
+        events=[]
+        worker=VoiceInput(VoiceSettings(),'unused',lambda *event:events.append(event),
+            recorder=Mock(return_value=b'audio'),
+            transcriber=Mock(transcribe=Mock(side_effect=NoSpeechError('No speech recognized.'))))
+        worker.start(('session','creature'));worker.thread.join(2)
+        self.assertEqual([kind for kind,_ in events],['voice_status','voice_empty','voice_done'])
+
     def test_volume_updates_replace_one_value_without_queueing_events(self):
         events = []
         def record(config, released, cancelled, on_recording, *, on_level):
