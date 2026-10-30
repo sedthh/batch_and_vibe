@@ -5,6 +5,10 @@ Lionhead's **Black & White**. Chat by **text or voice**, give your creature
 instructions, and let an LLM think about its needs and surroundings. It builds on
 the original creature AI, which keeps running and learning between LLM commands.
 
+Also works with [BW1-VR](https://github.com/BW-VR/BW1-VR) through **experimental VR
+support**, using voice input and the game's native subtitles. Use **Run B&W VR**
+in the launcher; see [VR setup and compatibility](docs/vr.md).
+
 This is an experimental, unofficial project, not affiliated with or endorsed by
 Lionhead Studios or the game's rights holders. **You need your own original game.**
 This repository does not include the game, saves or patches.
@@ -34,7 +38,7 @@ For a Windows 11 setup in 2026:
    Follow the patch author's instructions and **skip 1.30**. The patch also lets
    you skip the tutorials on a fresh installation.
 3. Launch `runblack.exe` as administrator and confirm the game runs and saves
-   correctly. **Exclusive fullscreen is not supported:** creature chat cannot
+   correctly. **Desktop overlay chat does not support exclusive fullscreen:** it cannot
    reliably appear there, so new LLM calls pause. Use windowed mode or the mod's
    **Run B&W borderless fullscreen** button, which fills the screen while keeping
    creature chat working.
@@ -152,6 +156,9 @@ Starting an action doesn't guarantee it worked; the mod also tracks game feedbac
 ## Roadmap and known limitations
 
 Want to help build or test it? See [contributing](docs/contributing.md).
+
+- [ ] Validate [experimental BW1-VR mode](docs/vr.md) on a real headset. It uses
+  native subtitles and optional voice activation; headset comfort and input remain unverified.
 
 - [ ] Separate AI memory and conversation by game profile and save. They currently
   survive restarts but are shared between saves/profiles for the same local user.

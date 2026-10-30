@@ -27,6 +27,24 @@ class Entry:
 
 
 class VoiceOverlayTests(unittest.TestCase):
+    def test_vr_notices_ignore_live_phases_and_report_error_once(self):
+        self.w.captions=Mock()
+        self.press()
+        self.event('voice_status','Listening')
+        self.event('voice_status','Transcribing')
+        self.w.captions.queue_voice_notice.assert_not_called()
+        self.event('voice_error','Microphone unavailable.')
+        self.w.captions.queue_voice_notice.assert_called_once_with('Voice error: Microphone unavailable.',self.v.job.identity)
+        before=self.w.captions.queue_voice_notice.call_count
+        self.event('voice_done')
+        self.assertEqual(self.w.captions.queue_voice_notice.call_count,before)
+
+    def test_vr_notice_contains_recognized_text_not_a_sent_status(self):
+        self.w.captions=Mock();self.w.submit=Mock()
+        self.press();self.event('voice_text','Cast water on that field.')
+        self.w.captions.queue_voice_notice.assert_called_once_with('Heard: Cast water on that field.',self.v.job.identity)
+        self.assertEqual(self.w.entry.get(),'Cast water on that field.')
+
     def test_unconfigured_or_disabled_voice_does_not_claim_f11_or_create_worker(self):
         from bwv.llm import LLMConfig
         widgets = {name: Mock() for name in ('Tk', 'Frame', 'Label', 'Text', 'Scrollbar', 'Entry', 'Button')}
@@ -188,6 +206,26 @@ class VoiceOverlayTests(unittest.TestCase):
         w.render = OverlayWindow.render.__get__(w)
         w.advance_submission = OverlayWindow.advance_submission.__get__(w)
         return w
+
+    def test_voice_heading_uses_input_preference_in_both_modes(self):
+        w=self.use_real_chat_flow();w.model.is_dummy=False
+        for vr in (False,True):
+            w.vr=vr
+            for automatic in (False,True):
+                w.voice.automatic=automatic;w.render()
+                w.heading.configure.assert_called_with(text='Chat Ctrl+Enter   -   Voice '+
+                    ('activation' if automatic else 'F11'))
+
+    def test_native_fullscreen_hides_desktop_overlay_without_disabling_voice(self):
+        w=self.use_real_chat_flow();w.native_fullscreen=True
+        w.hide_window=Mock()
+        OverlayWindow.open_input(w,focus=False)
+        w.win.u.ShowWindow.assert_not_called()
+        w.win.u.SetForegroundWindow.assert_not_called()
+        w.render()
+        w.hide_window.assert_called_once()
+        w.diagnostics.assert_called_with(False)
+        self.assertTrue(w.model.can_send())
 
     def test_voice_status_and_meter_stay_in_input_without_replacing_reply(self):
         w = self.use_real_chat_flow()

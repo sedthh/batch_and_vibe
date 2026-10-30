@@ -27,6 +27,7 @@
   },
   "wake_on_question": false,
   "reenable_cut_content": true,
+  "vr_mode": false,
   "voice": {
     "enabled": false,
     "provider": "local",
@@ -35,6 +36,7 @@
     "api_key_env": "OPENAI_API_KEY",
     "language": "",
     "hotkey": "F11",
+    "push_to_talk": true,
     "auto_send": true,
     "microphone": "",
     "max_recording_seconds": 60,

@@ -22,6 +22,9 @@ def arguments(argv=None):
     parser.add_argument('--game', type=Path, help='Game folder; remembered privately after selection')
     parser.add_argument('--config', type=Path, help='Private settings file (default: settings.json)')
     parser.add_argument('--dummy', action='store_true', help='Use deterministic test replies without any provider calls')
+    vr_options=parser.add_mutually_exclusive_group()
+    vr_options.add_argument('--vr', dest='vr', action='store_true', default=None, help='Override saved mode: BW1-VR subtitles')
+    vr_options.add_argument('--no-vr', dest='vr', action='store_false', help='Override saved mode: desktop chat and push-to-talk')
     parser.add_argument('--debug', action='store_true', help='Enable and print browser debugger URLs')
     parser.add_argument('--port', type=int, help='Localhost port for both debug pages; requires --debug (default: a free port)')
     actions = parser.add_mutually_exclusive_group()
@@ -38,6 +41,8 @@ def arguments(argv=None):
     group.add_argument('--configure', action='store_true', help='Edit model, API key and basic settings without starting the mod or requesting elevation')
     parser.add_argument('--bridge', type=Path, default=Path('build/native-held-actions/ScriptLibraryR.dll'))
     args = parser.parse_args(argv)
+    if args.vr and args.no_overlay:
+        parser.error('--vr requires the overlay process for voice and subtitles')
     if args.port is not None:
         if not args.debug:
             parser.error('--port requires --debug; normal startup has no HTTP server')
@@ -227,6 +232,9 @@ def main(argv=None):
                 SettingsWindow(config_path).root.mainloop()
                 settings, config_path = load_settings(config_path)
                 prepare_provider(settings, config_path, dummy=args.dummy)
+            vr=settings.vr_mode if args.vr is None else args.vr
+            if vr and args.no_overlay:
+                raise ValueError('VR mode requires the overlay process. Remove --no-overlay or select desktop mode.')
         if not ensure_admin(argv):
             return 0
         with instance_lock(config_path.parent / '.local' / 'launcher.lock'):
@@ -249,24 +257,36 @@ def main(argv=None):
                     if not args.no_window:
                         show_install_success()
                 return 0
+            from .vr_install import installation_error as vr_installation_error
+            if vr and vr_installation_error(root):
+                if args.no_window:raise ValueError(vr_installation_error(root))
+                print('VR mode disabled for this run: '+vr_installation_error(root),flush=True)
+                vr=False
             ensure_installed(root, args.bridge, window=not args.no_window)
             from .supervisor import play
             from .launcher_lifecycle import run_managed
             from .game_display import GameLauncher
             from .debug_session import DebugSession
             debug_session = DebugSession(args.debug, args.port or 0)
-            game_launcher = None if args.no_window else GameLauncher(root)
+            game_launcher = None if args.no_window else GameLauncher(root,vr_mode=vr)
             automatic = not args.no_ticks
 
             def apply_settings(updated):
-                nonlocal settings, automatic
+                nonlocal settings, automatic, vr
                 prepare_provider(updated, config_path, dummy=args.dummy)
+                if updated.vr_mode and args.no_overlay:
+                    raise ValueError('VR mode requires the overlay process. Restart without --no-overlay.')
+                if updated.vr_mode and vr_installation_error(root):
+                    raise ValueError(vr_installation_error(root))
+                vr=updated.vr_mode
+                if game_launcher is not None:
+                    game_launcher.vr_mode=vr
                 if debug_session.runtime is not None:
                     automatic = debug_session.runtime.automatic
                 settings = updated
 
             asyncio.run(run_managed(lambda emit: play(root, settings, config_path, dummy=args.dummy, actions=args.actions,
-                             debug=args.debug, overlay=not args.no_overlay, automatic=automatic,
+                             debug=args.debug, overlay=not args.no_overlay, automatic=automatic, vr=vr,
                              port=args.port or 0, emit=emit, debug_session=debug_session), config_path, window=not args.no_window,
                              game_launcher=game_launcher, debug_session=debug_session,
                              apply_settings=apply_settings))

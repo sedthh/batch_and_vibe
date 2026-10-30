@@ -40,6 +40,7 @@ ID, debugger URL, provider or model from another session.
   [roadmap and known limitations](README.md#roadmap-and-known-limitations).
   Treat it as the maintained overview; do not assume planned features already work.
 - For launch flags, provider limitations and uninstalling, read [usage](docs/usage.md).
+- For opt-in BW1-VR subtitles and configurable voice input, read [VR compatibility](docs/vr.md).
 - For code changes, read [contributing](docs/contributing.md) and the relevant source.
 
 ## Set up the game and mod
@@ -110,7 +111,7 @@ precedence over saved keys. Keep the bundled `src/bwv/settings.default.json` gen
 
 ### Voice model
 
-1. In **Voice**, check **Enable push-to-talk** and apply a speech preset.
+1. In **Voice**, check **Enable voice** and apply a speech preset.
    **Local Whisper** runs speech recognition in the mod; install its optional
    runtime from the checkout with
    `.venv\Scripts\python.exe -m pip install -e ".[voice-local]"`.
