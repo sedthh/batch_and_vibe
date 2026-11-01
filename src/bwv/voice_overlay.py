@@ -1,4 +1,5 @@
 """Push-to-talk UI state, driven by the overlay's existing timer."""
+import time
 from .voice import HOTKEYS, VoiceInput
 
 
@@ -35,7 +36,12 @@ class VoiceInputMeter:
 class VoiceOverlay:
     def __init__(self, window, config, settings_path, *, service=None):
         self.window, self.config = window, config
-        self.service = service or VoiceInput(config, settings_path, window.emit)
+        self.automatic=not config.push_to_talk
+        self.auto_failed=False;self.retry_at=0
+        if self.automatic:
+            from .voice_activation import capture_activated
+            self.service=service or VoiceInput(config,settings_path,window.emit,recorder=capture_activated)
+        else:self.service = service or VoiceInput(config, settings_path, window.emit)
         self.job = None
         self.active = False
         self.status = ''
@@ -45,9 +51,16 @@ class VoiceOverlay:
         w = self.window
         return bool(w.game and w.win.u.GetForegroundWindow() in (w.game, w.hwnd))
 
+    def caption(self,text):
+        captions=getattr(self.window,'captions',None)
+        if captions is not None:
+            identity=self.job.identity if self.job else self.window.model.identity
+            captions.queue_voice_notice(text,identity)
+
     def valid(self):
         return bool(self.job and not self.job.cancelled.is_set() and self.focused()
-            and self.window.model.can_show() and self.window.model.identity == self.job.identity)
+            and self.window.model.can_show() and self.window.model.identity == self.job.identity
+            and (not self.automatic or self.window.model.can_send()))
 
     def cancel(self):
         if self.active:
@@ -55,11 +68,16 @@ class VoiceOverlay:
             self.active = False
             self.status = ''
             self.window.notice = '[Voice input cancelled.]'
+            self.retry_at=time.monotonic()+.5
 
     def tick(self):
         w = self.window
-        down = all(w.win.u.GetAsyncKeyState(key) & 0x8000 for key in HOTKEYS[self.config.hotkey])
+        down = True if self.automatic else all(w.win.u.GetAsyncKeyState(key) & 0x8000 for key in HOTKEYS[self.config.hotkey])
         pressed = down and not self.was_down
+        if self.automatic:
+            pressed=(not self.auto_failed and time.monotonic()>=self.retry_at and not w.pending
+                and not self.service.busy and not w.model.is_thinking() and not w.entry.get().strip()
+                and not w.win.u.GetAsyncKeyState(0x1B)&0x8000)
         self.was_down = down
         if self.active:
             if not self.valid() or w.win.u.GetAsyncKeyState(0x1B) & 0x8000:
@@ -93,6 +111,7 @@ class VoiceOverlay:
         if job is not self.job: return
         if kind == 'voice_done':
             self.active = False; self.status = ''
+            self.retry_at=max(self.retry_at,time.monotonic()+.5)
             return
         if not self.active: return
         if not self.valid():
@@ -101,11 +120,19 @@ class VoiceOverlay:
         w = self.window
         if kind == 'voice_status':
             self.status = value
+        elif kind == 'voice_empty':
+            self.active=False;self.status=''
+            self.retry_at=time.monotonic()+1
+            w.notice='['+value+(' Listening will resume shortly.' if self.automatic else '')+']'
+            self.caption('Voice: No speech recognized. Try again.')
         elif kind == 'voice_error':
             self.active = False; self.status = ''
-            w.notice = '[ERROR: ' + value + ']'
+            self.auto_failed=self.automatic
+            w.notice = '[ERROR: ' + value + (' Save & apply Voice settings to restart activation.' if self.automatic else '') + ']'
+            self.caption('Voice error: '+value)
         elif kind == 'voice_text':
             self.active = False; self.status = ''
+            self.caption('Heard: '+value)
             w.entry.configure(state='normal')
             w.entry.delete(0, 'end'); w.entry.insert(0, value)
             w.entry.icursor(0); w.entry.xview_moveto(0)

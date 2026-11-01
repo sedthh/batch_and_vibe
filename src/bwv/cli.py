@@ -57,6 +57,7 @@ def main() -> int:
     overlay.add_argument("--diagnostics-file", type=Path, help="Optional local overlay diagnostics, without chat text")
     overlay.add_argument("--stop-on-stdin", action="store_true", help="Launcher-owned overlay: close when its parent pipe closes")
     overlay.add_argument("--settings", type=Path, help="Private settings used for optional voice input")
+    overlay.add_argument("--vr", action="store_true", help="Experimental game subtitles and voice input for BW1-VR")
     watch = sub.add_parser("watch", help="Read live observations through the mock planner; no game actions")
     watch.add_argument("pid", type=int)
     watch.add_argument("--seconds", type=float, default=5)
@@ -99,7 +100,7 @@ def main() -> int:
         elif args.command == "overlay":
             from .overlay import run
             result = run(args.chat_url,seconds=args.seconds,diagnostics_file=args.diagnostics_file,
-                         stop_on_stdin=args.stop_on_stdin,settings_path=args.settings)
+                         stop_on_stdin=args.stop_on_stdin,settings_path=args.settings,vr=args.vr)
         elif args.command == "qa-live-dummy":
             from .qa_live import run
             result = run(args.source_url,args.port,args.seconds,state_dir=args.state_dir,config_path=args.config,

@@ -6,6 +6,7 @@ import subprocess
 import time
 
 from .processes import game_processes
+from .game_paths import set_game_directory, restore_game_directory
 
 SETUP_KEY = r'Software\Lionhead Studios Ltd\Black & White\BWSetup'
 RESOLUTIONS = ('800x600', '1024x768', '1280x720', '1280x960', '1600x900', '1920x1080')
@@ -132,8 +133,9 @@ class DisplayWindows:
 
 class DisplayMonitor:
     """Shared by scheduling and the final pre-HTTP check, including tool rounds."""
-    def __init__(self, windows, pid, *, clock=time.monotonic):
+    def __init__(self, windows, pid, *, clock=time.monotonic, native_subtitles=False):
         self.windows,self.pid,self.clock=windows,pid,clock
+        self.native_subtitles=native_subtitles
         self.overlay_alive=lambda:True
         self.cached=None;self.next_check=0;self.mode='unavailable';self.error=None
 
@@ -146,8 +148,8 @@ class DisplayMonitor:
                 self.error=None
             except (OSError,ValueError) as error:
                 self.mode='unavailable';self.error=type(error).__name__
-        if self.mode=='fullscreen':return 'fullscreen_overlay_unavailable'
-        if self.mode not in ('windowed','borderless'):return 'game_display_unavailable'
+        if self.mode=='fullscreen' and not self.native_subtitles:return 'fullscreen_overlay_unavailable'
+        if self.mode not in ('windowed','borderless','fullscreen'):return 'game_display_unavailable'
         if not self.overlay_alive():return 'chat_overlay_unavailable'
         return None
 
@@ -156,15 +158,31 @@ class GameLauncher:
     """Start one game, then apply borderless style without blocking Tk or asyncio."""
     def __init__(self, root, *, windows=None, discover=game_processes,
                  spawn=subprocess.Popen, configure=write_windowed_settings,
-                 restore=restore_display_settings, clock=time.monotonic):
+                 restore=restore_display_settings, clock=time.monotonic, vr_mode=False,
+                 configure_directory=set_game_directory, restore_directory=restore_game_directory):
         self.root=Path(root);self.windows=windows or DisplayWindows()
         self.discover,self.spawn,self.configure,self.restore,self.clock=discover,spawn,configure,restore,clock
+        self.configure_directory,self.restore_directory=configure_directory,restore_directory
         self.pending=None
+        self.vr_mode=vr_mode
+        self.desktop_vr_settings=False
         self.process=None
         self._discovered_running=False
         self._next_discovery=0
         self._next_install_check=0
         self._installation_error=None
+        self._next_vr_check=0
+        self._vr_checked_root=None
+        self._vr_error=None
+
+    @property
+    def vr_installation_error(self):
+        from .vr_install import installation_error
+        now=self.clock()
+        if now>=self._next_vr_check or self._vr_checked_root!=self.root:
+            self._vr_error=installation_error(self.root)
+            self._vr_checked_root=self.root;self._next_vr_check=now+1
+        return self._vr_error
 
     @property
     def installation_error(self):
@@ -190,10 +208,24 @@ class GameLauncher:
         return self._discovered_running
 
     def start(self, mode, resolution, hwnd=None):
-        if mode not in ('windowed','borderless'):raise ValueError('Unknown game display mode')
+        if mode not in ('windowed','borderless','vr'):raise ValueError('Unknown game display mode')
+        if (mode=='vr')!=self.vr_mode:raise ValueError('Apply the matching VR or desktop mode before starting the game.')
         self._next_install_check=0
         if self.installation_error:raise ValueError(self.installation_error)
         if self.busy or self.discover():raise ValueError('Black & White is already running or starting. Close it before changing display mode.')
+        from .vr_desktop import restore as restore_vr
+        restore_vr(self.root)
+        if mode=='vr':
+            from .vr_install import VR_LAUNCHER,installation_error
+            error=installation_error(self.root)
+            if error:raise ValueError('BW1-VR is unavailable. See Settings > VR for installation details.')
+            launcher=self.root/VR_LAUNCHER
+            previous_directory=self.configure_directory(self.root)
+            try:self.process=self.spawn([str(launcher)],cwd=str(self.root))
+            except (OSError,ValueError):
+                self.restore_directory(previous_directory)
+                raise
+            return 'Opened the BW1-VR launcher. Choose Play in VR there; its display settings are preserved.'
         if resolution not in RESOLUTIONS:raise ValueError('Choose a window size from the list.')
         bounds=self.windows.monitor(hwnd)
         width,height=(tuple(map(int,resolution.split('x'))) if mode=='windowed'
@@ -203,10 +235,19 @@ class GameLauncher:
         if not exe.is_file():raise ValueError('runblack.exe is missing from the selected installation.')
         previous=self.configure(width,height)
         try:
+            from .vr_desktop import prepare
+            self.desktop_vr_settings=prepare(self.root)
+            previous_directory=self.configure_directory(self.root)
             # No runas prompt: a child inherits the elevated launcher's token.
-            process=self.spawn([str(exe)],cwd=str(self.root))
-        except OSError:
-            self.restore(previous)
+            try:process=self.spawn([str(exe)],cwd=str(self.root))
+            except (OSError,ValueError):
+                self.restore_directory(previous_directory)
+                raise
+        except (OSError,ValueError):
+            try:restore_vr(self.root)
+            finally:
+                self.desktop_vr_settings=False
+                self.restore(previous)
             raise
         self.process=process
         self.pending={'process':process,'mode':mode,'bounds':bounds,'size':(width,height),
@@ -215,6 +256,10 @@ class GameLauncher:
         return 'Starting Black & White '+('borderless fullscreen' if mode=='borderless' else resolution+' windowed')+'.'
 
     def poll(self):
+        if self.desktop_vr_settings and self.process is not None and self.process.poll() is not None:
+            from .vr_desktop import restore
+            restore(self.root)
+            self.desktop_vr_settings=False
         if not self.pending:return None
         pending=self.pending;process=pending['process']
         if process.poll() is not None:

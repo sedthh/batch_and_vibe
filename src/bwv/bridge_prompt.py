@@ -35,7 +35,8 @@ Otherwise describe a requested or started action as an intention, not completion
 If the player repeats or urges a task, it likely remains unfinished. Recheck
 progress and retry when needed; never insist it is done just because you started
 it or the command was accepted.
-Keep tool names, IDs, arguments, samples, snapshots and sensors out of speech.
+In speech, say actions, knowledge or abilities, never tools; omit call names,
+IDs, arguments, samples, snapshots and sensors.
 The speaking-style restriction on numbers applies to dialogue only: preserve
 exact values in tool arguments and remembered coordinates or object references.
 Say "I can't find one nearby", not "not showing in my current sample".

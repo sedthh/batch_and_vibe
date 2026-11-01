@@ -27,6 +27,46 @@ class Entry:
 
 
 class VoiceOverlayTests(unittest.TestCase):
+    def test_remapped_extended_key_holds_recording_and_releases_to_transcribe(self):
+        for shortcut,keys in (('F13',{0x7C}),('Ctrl+F24',{0x11,0x87})):
+            self.setUp();self.v.config=replace(self.v.config,hotkey=shortcut)
+            if len(keys)>1:
+                self.keys.add(0x87);self.v.tick();self.service.start.assert_not_called()
+            self.keys.update(keys);self.v.tick()
+            self.service.start.assert_called_once()
+            self.v.tick();self.service.start.assert_called_once()
+            self.keys.clear();self.v.tick()
+            self.assertTrue(self.v.job.released.is_set())
+
+    def test_extended_shortcuts_bind_in_desktop_entry_without_special_case_lookup(self):
+        from bwv.llm import LLMConfig
+        widgets={name:Mock() for name in ('Tk','Frame','Label','Text','Scrollbar','Entry','Button')}
+        for shortcut,binding in (('F13','<F13>'),('Ctrl+F24','<Control-F24>')):
+            with patch.multiple('tkinter',**widgets),patch('bwv.overlay_windows.Windows'), \
+                    patch('bwv.overlay_windows.threading.Thread'), \
+                    patch('bwv.llm.LLMConfig.load',return_value=LLMConfig('fixture',voice=VoiceSettings(enabled=True,hotkey=shortcut))), \
+                    patch('bwv.voice_overlay.VoiceOverlay'),patch('bwv.voice_overlay.VoiceInputMeter'):
+                window=OverlayWindow(Mock(),settings_path='unused')
+                self.assertIn(binding,[call.args[0] for call in window.entry.bind.call_args_list])
+
+    def test_vr_notices_ignore_live_phases_and_report_error_once(self):
+        self.w.captions=Mock()
+        self.press()
+        self.event('voice_status','Listening')
+        self.event('voice_status','Transcribing')
+        self.w.captions.queue_voice_notice.assert_not_called()
+        self.event('voice_error','Microphone unavailable.')
+        self.w.captions.queue_voice_notice.assert_called_once_with('Voice error: Microphone unavailable.',self.v.job.identity)
+        before=self.w.captions.queue_voice_notice.call_count
+        self.event('voice_done')
+        self.assertEqual(self.w.captions.queue_voice_notice.call_count,before)
+
+    def test_vr_notice_contains_recognized_text_not_a_sent_status(self):
+        self.w.captions=Mock();self.w.submit=Mock()
+        self.press();self.event('voice_text','Cast water on that field.')
+        self.w.captions.queue_voice_notice.assert_called_once_with('Heard: Cast water on that field.',self.v.job.identity)
+        self.assertEqual(self.w.entry.get(),'Cast water on that field.')
+
     def test_unconfigured_or_disabled_voice_does_not_claim_f11_or_create_worker(self):
         from bwv.llm import LLMConfig
         widgets = {name: Mock() for name in ('Tk', 'Frame', 'Label', 'Text', 'Scrollbar', 'Entry', 'Button')}
@@ -189,6 +229,32 @@ class VoiceOverlayTests(unittest.TestCase):
         w.advance_submission = OverlayWindow.advance_submission.__get__(w)
         return w
 
+    def test_desktop_voice_heading_uses_input_preference(self):
+        w=self.use_real_chat_flow();w.model.is_dummy=False;w.vr=False
+        for automatic in (False,True):
+            w.voice.automatic=automatic;w.render()
+            w.heading.configure.assert_called_with(text='Chat Ctrl+Enter   -   Voice '+
+                ('activation' if automatic else 'F11'))
+
+    def test_vr_hides_windowed_fallback_chat_without_disabling_voice(self):
+        w=self.use_real_chat_flow();w.vr=True
+        w.hide_window=Mock()
+        w.want_hotkey.set()
+        OverlayWindow.open_input(w,focus=False)
+        w.win.u.ShowWindow.assert_not_called()
+        w.win.u.SetForegroundWindow.assert_not_called()
+        w.render()
+        w.hide_window.assert_called_once()
+        w.diagnostics.assert_called_with(False)
+        self.assertFalse(w.want_hotkey.is_set())
+        self.assertTrue(w.model.can_send())
+        self.press();self.service.start.assert_called_once()
+        self.release();self.event('voice_text','Hello from a desktop fallback.')
+        w.advance_submission()
+        w.client.ask.assert_called_once_with('Hello from a desktop fallback.',w.model.identity)
+        w.win.u.ShowWindow.assert_not_called()
+        w.win.u.SetForegroundWindow.assert_not_called()
+
     def test_voice_status_and_meter_stay_in_input_without_replacing_reply(self):
         w = self.use_real_chat_flow()
         w.model.is_dummy = False
@@ -245,7 +311,9 @@ class VoiceOverlayTests(unittest.TestCase):
 
     def test_failed_voice_send_unlocks_original_transcript_for_editing(self):
         w = self.use_real_chat_flow()
+        w.captions=Mock();identity=w.model.identity
         w.client.ask.side_effect = OSError('fixture connection failed')
+        w.client.state.side_effect = OSError('fixture service unavailable')
         self.press(); self.release(); self.event('voice_text', 'Gyere ide!')
         self.assertEqual(w.entry.state, 'disabled')
         w.tick(); w.tick()
@@ -253,6 +321,7 @@ class VoiceOverlayTests(unittest.TestCase):
         self.assertEqual((w.entry.get(), w.entry.state), ('Gyere ide!', 'normal'))
         self.assertTrue(w.expanded)
         w.client.ask.assert_called_once()
+        w.captions.queue_model_error.assert_called_once_with('chat_transport_failed',identity)
 
 
 class VoiceMeterTests(unittest.TestCase):

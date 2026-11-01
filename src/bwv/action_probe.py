@@ -568,11 +568,12 @@ def configure_cut_content(pid, enabled):
 def submit(pid, packet):
     if os.name != 'nt':
         raise OSError('The action experiment requires Windows')
-    if type(pid) is not int or not 0 < pid <= 0xffffffff or type(packet) is not bytes or len(packet) not in (COMMAND.size, COMMAND.size+8):
+    if type(pid) is not int or not 0 < pid <= 0xffffffff or type(packet) is not bytes or len(packet) not in (COMMAND.size, COMMAND.size+8, COMMAND.size+512):
         raise ValueError('Invalid action experiment request')
     header=COMMAND.unpack(packet[:COMMAND.size])
     coordinate_packet=(header[1] & ~(PRIORITY_FLAG|PLAYER_COMMAND_FLAG|NIGHT_PRIORITY_FLAG|0x30000000))==11 and header[-2]==20
-    if len(packet)!=(COMMAND.size+8 if coordinate_packet else COMMAND.size):
+    caption_packet=header[1]==15 and header[-2] in (0,1)
+    if len(packet)!=(COMMAND.size+512 if caption_packet else COMMAND.size+8 if coordinate_packet else COMMAND.size):
         raise ValueError('Action packet length does not match its protocol')
     kernel = ctypes.WinDLL('kernel32',use_last_error=True)
     kernel.CreateFileW.argtypes = [wintypes.LPCWSTR,wintypes.DWORD,wintypes.DWORD,

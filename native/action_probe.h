@@ -220,6 +220,7 @@ bool world_miracle_allowed(uintptr_t mental,const MiracleRecipe& r) {
 }
 #endif
 #endif
+#include "vr_caption.h"
 namespace bwv_probe {
 const char* compatibility_method="unsupported";
 bool fingerprint() {
@@ -792,6 +793,7 @@ void tick(uint64_t epoch,bool observing) {
                                  "observer_disconnected",clear_command_priority);
         thinking_pause.release("observer_disconnected");
         thinking_owner=0;
+        caption_tick(epoch,obs.creature,false,now);
 #ifdef BWV_HELD_ACTIONS
         mushroom_priority.release(epoch,inspect_command_priority(obs.creature),
                                   "observer_disconnected",clear_command_priority);
@@ -823,6 +825,7 @@ void tick(uint64_t epoch,bool observing) {
     else if (!stable_since) stable_since=now;
     if (!blocked && !(obs.actions&((1u<<11)|(1u<<15))) && now-stable_since<500) blocked="settling";
     if (!TryAcquireSRWLockExclusive(&lock)) return;
+    caption_tick(epoch,obs.creature,blocked==nullptr,now);
     latest_agenda=inspect_command_priority(obs.creature);
     latest_thinking_leash=obs.leash;
     update_thinking_pause(epoch,now,obs.creature,obs.mental,obs.blocked==nullptr,obs.leash);
@@ -1661,6 +1664,7 @@ std::string json() {
         ",\"movement_pace\":{\"version\":"+(movement_pace_verified?"1":"0")+",\"hand_default\":\"run\",\"active\":"+(movement_pace.creature?"true":"false")
             +",\"requested\":\""+(requested_pace==Pace::run?"run":requested_pace==Pace::walk?"walk":"auto")+"\",\"applied\":"+(movement_pace.written?"true":"false")
             +(movement_pace_verified?",\"controller_pace\":"+std::to_string(current_pace.current)+",\"walk_preset\":"+std::to_string(current_pace.walk)+",\"run_preset\":"+std::to_string(current_pace.run):"")+"}"+
+        ",\"vr_caption\":{\"version\":15,\"notices\":true,\"busy\":"+(caption_busy?"true":"false")+",\"queued\":"+(caption_queued?"true":"false")+",\"status\":\""+caption_status+"\",\"submitted\":"+std::to_string(caption_delivered)+"}"+
         ",\"transport_ready\":"+(transport_ready?"true":"false")+
         ",\"phase\":\""+name(policy.phase)+"\",\"reason\":\""+policy.reason+"\",\"epoch\":"+
         std::to_string(policy.epoch)+",\"generation\":"+std::to_string(policy.generation)+
@@ -1804,25 +1808,34 @@ DWORD WINAPI serve(void*) {
     const std::wstring name=L"\\\\.\\pipe\\bwv-action-probe-"+std::to_wstring(GetCurrentProcessId());
     HANDLE pipe=CreateNamedPipeW(name.c_str(),PIPE_ACCESS_DUPLEX|FILE_FLAG_FIRST_PIPE_INSTANCE,
         PIPE_TYPE_MESSAGE|PIPE_READMODE_MESSAGE|PIPE_NOWAIT|PIPE_REJECT_REMOTE_CLIENTS,
-        1,128,128,1000,&attributes);
+        1,1024,1024,1000,&attributes);
     LocalFree(descriptor);
     if (pipe==INVALID_HANDLE_VALUE) return 5;
     AcquireSRWLockExclusive(&lock); transport_ready=true; ReleaseSRWLockExclusive(&lock);
     for (;;) {
         if (!ConnectNamedPipe(pipe,nullptr) && GetLastError()!=ERROR_PIPE_CONNECTED) { Sleep(20); continue; }
-        struct Packet {Command command;PositionDestination destination;};
-        static_assert(sizeof(Packet)==48);
+        struct Packet {Command command;union {PositionDestination destination;wchar_t caption[caption_units];};};
+        static_assert(sizeof(Packet)==40+caption_units*2);
         Packet packet{};auto& command=packet.command; DWORD bytes=0; bool read_ok=false;
         const uint64_t deadline=GetTickCount64()+1000;
         do {
             if (ReadFile(pipe,&packet,sizeof(packet),&bytes,nullptr)) {
-                read_ok=bytes==(command.protocol()==11?sizeof(packet):sizeof(Command)); break; }
+                read_ok=bytes==action_packet_size(command); break; }
             if (GetLastError()!=ERROR_NO_DATA) break;
             Sleep(10);
         } while (GetTickCount64()<deadline);
         uint32_t accepted=0;
         AcquireSRWLockExclusive(&lock);
         const auto lookup_now=GetTickCount64();
+        const bool caption=read_ok && command.magic==0x42575041 && command.version==caption_protocol;
+        if(caption && !caption_queued && !caption_busy && command.action<=1 && command.epoch==policy.epoch && command.reserved==last_creature
+                && last_creature && observation_active && command.generation==policy.generation
+                && command.offered_at<=lookup_now && lookup_now-command.offered_at<=1500
+                && valid_caption(packet.caption)) {
+            std::copy_n(packet.caption,caption_units,caption_pending.begin());
+            caption_epoch=command.epoch;caption_creature=last_creature;caption_until=lookup_now+(command.action==1?1500:10000);
+            caption_notice=command.action==1;caption_queued=true;caption_status="queued";accepted=1;
+        }
         const bool thinking=read_ok && command.magic==0x42575041 && command.version==ThinkingPause::protocol;
         if(thinking && thinking_hook_installed) {
             if(command.action==0) {
@@ -1864,7 +1877,7 @@ DWORD WINAPI serve(void*) {
             && (!policy.terminal || !policy.verified_exit) && executed_epoch==policy.epoch
             && executed_creature==last_creature && executed_mental==last_mental;
         const InterruptedAction previous{requested_action,request_at,0};
-        if (read_ok && !lookup && !configured && !thinking && !has_pending
+        if (read_ok && !caption && !lookup && !configured && !thinking && !has_pending
                 && (command.pace()==Pace::automatic || (movement_pace_verified
                     && (command.action!=19 || (world_offers.find(command.reserved)
                         && !std::strcmp(world_recipes[world_offers.find(command.reserved)->recipe].name,"move_to")))))
