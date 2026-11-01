@@ -139,12 +139,8 @@ class OverlayWindow:
         from .overlay import ChatInputHistory
         self.win=Windows();self.client=client;self.model=OverlayModel()
         self.vr=vr
-        self.native_fullscreen=False
-        self.vr_display=None
         self.captions=None
         if vr:
-            from .game_display import DisplayWindows
-            self.vr_display=DisplayWindows()
             from .vr import CaptionMirror
             self.captions=CaptionMirror()
         self.input_history=ChatInputHistory()
@@ -256,7 +252,7 @@ class OverlayWindow:
 
     def open_input(self, *, focus=True):
         """Show the shared draft; automatic voice sending keeps focus in the game."""
-        if getattr(self,'native_fullscreen',False):return
+        if getattr(self,'vr',False):return
         if not self.model.can_show():return
         if self.win.u.GetForegroundWindow() not in (self.game,self.hwnd):return
         self.expanded=True
@@ -324,7 +320,8 @@ class OverlayWindow:
         return 'break'
 
     def render(self):
-        if getattr(self,'native_fullscreen',False):
+        if getattr(self,'vr',False):
+            self.want_hotkey.clear()
             self.win.own_style(self.hwnd,False)
             self.hide_window()
             self.diagnostics(False)
@@ -442,7 +439,7 @@ class OverlayWindow:
         voice=getattr(self,'voice',None)
         captions=getattr(self,'captions',None)
         status={'game_pid':self.model.game_pid,'game_window':self.game,'overlay_window':self.hwnd,
-            'native_fullscreen':getattr(self,'native_fullscreen',False),
+            'native_subtitles':getattr(self,'vr',False),
             'vr_caption_status':captions.status if captions else None,
             'voice_enabled':voice is not None,
             'voice_automatic':voice.automatic if voice else None,
@@ -523,9 +520,6 @@ class OverlayWindow:
         self.advance_submission()
         if not self.game or self.win.pid(self.game)!=self.model.game_pid or not self.win.rect(self.game):
             self.game=self.win.game_window(self.model.game_pid)
-        if getattr(self,'vr_display',None) is not None:
-            try:self.native_fullscreen=self.vr_display.mode(self.model.game_pid)=='fullscreen'
-            except (OSError,ValueError):self.native_fullscreen=True
         if getattr(self,'voice',None):self.voice.tick()
         if self.expanded and self.model.can_send() and self.win.u.GetForegroundWindow() not in (0,self.game,self.hwnd):
             self.expanded=False;self.win.own_style(self.hwnd,False)

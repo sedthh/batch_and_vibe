@@ -59,16 +59,17 @@ game exits, or before the next launch if our mod was closed first. Other BW1-VR
 options are preserved. A recovery record stays beside the game until restoration.
 Load a save with your creature. Keep the game mirror window focused.
 When our mod is in VR mode, native subtitles also work with **Play without VR**.
-In native fullscreen the desktop chat overlay stays hidden; voice and native
-subtitles remain active. Normal desktop mode still requires windowed or borderless
-fullscreen for its overlay.
+The desktop chat overlay stays hidden in every display mode, including a windowed
+fallback after OpenXR startup fails. Voice and native subtitles remain active;
+this does not enable stereo rendering without a working VR runtime.
+Use our normal windowed or borderless launch buttons for desktop text chat.
 
 Configure a microphone and transcription model in **Voice** and enable voice.
 With **Push to talk** off, speak normally, then pause for about **1.2 seconds**
 to transcribe. Enable **Send transcript immediately** for hands-free sending;
-otherwise the transcript waits for review in the desktop chat.
-Use immediate sending in native fullscreen, where the desktop review controls
-are not visible.
+otherwise the transcript waits for review, which is unavailable in VR mode.
+The VR settings tab reminds you if transcript review is on. VR leaves your voice
+preferences unchanged; enable immediate sending to talk without desktop controls.
 Voice activation requires no keyboard key or controller button.
 Voice stays off if disabled or its model is blank.
 An empty transcription resumes listening after one second. Microphone and provider failures still
@@ -95,8 +96,7 @@ There is no headset tracking or microphone-mute detection in this integration.
 Replies go through the game's own help-text renderer, which BW1-VR renders in
 its VR interface. Each page starts with the configured creature name (or
 `Creature` when unnamed), for example `Bongo: Hello.` The bridge colours the name
-warm gold and restores the game's default colour for the reply. The desktop
-chat remains available too. Long replies are
+warm gold and restores the game's default colour for the reply. Long replies are
 split into short pages, each displayed for up to ten seconds. A newer reply
 replaces pending pages. Scene changes and stale creature identities discard
 pending text. Incoming text is restricted to plain BMP characters; unsupported
@@ -143,9 +143,10 @@ simulation, native packet acceptance, subtitle drawing in captured eye images,
 and expiry. It cannot establish headset comfort, subtitle depth/readability,
 OpenXR focus behavior, microphone quality, or controller usability.
 
-For a first test, use `--vr --dummy --no-actions --no-ticks` and **disable voice**
-to avoid microphone capture and provider calls. Desktop Ctrl+Enter can test
-replies even without a headset. Then test voice deliberately with a local speech
+For a first test, use `--vr --dummy --no-actions` and **disable voice**
+to test automatic replies without microphone capture or provider calls.
+VR mode has no desktop text input, even without a headset.
+Then test voice deliberately with a local speech
 model or your configured API limits. `--dummy` replaces only the chat model.
 
 For a headset tester's PR review:

@@ -229,25 +229,31 @@ class VoiceOverlayTests(unittest.TestCase):
         w.advance_submission = OverlayWindow.advance_submission.__get__(w)
         return w
 
-    def test_voice_heading_uses_input_preference_in_both_modes(self):
-        w=self.use_real_chat_flow();w.model.is_dummy=False
-        for vr in (False,True):
-            w.vr=vr
-            for automatic in (False,True):
-                w.voice.automatic=automatic;w.render()
-                w.heading.configure.assert_called_with(text='Chat Ctrl+Enter   -   Voice '+
-                    ('activation' if automatic else 'F11'))
+    def test_desktop_voice_heading_uses_input_preference(self):
+        w=self.use_real_chat_flow();w.model.is_dummy=False;w.vr=False
+        for automatic in (False,True):
+            w.voice.automatic=automatic;w.render()
+            w.heading.configure.assert_called_with(text='Chat Ctrl+Enter   -   Voice '+
+                ('activation' if automatic else 'F11'))
 
-    def test_native_fullscreen_hides_desktop_overlay_without_disabling_voice(self):
-        w=self.use_real_chat_flow();w.native_fullscreen=True
+    def test_vr_hides_windowed_fallback_chat_without_disabling_voice(self):
+        w=self.use_real_chat_flow();w.vr=True
         w.hide_window=Mock()
+        w.want_hotkey.set()
         OverlayWindow.open_input(w,focus=False)
         w.win.u.ShowWindow.assert_not_called()
         w.win.u.SetForegroundWindow.assert_not_called()
         w.render()
         w.hide_window.assert_called_once()
         w.diagnostics.assert_called_with(False)
+        self.assertFalse(w.want_hotkey.is_set())
         self.assertTrue(w.model.can_send())
+        self.press();self.service.start.assert_called_once()
+        self.release();self.event('voice_text','Hello from a desktop fallback.')
+        w.advance_submission()
+        w.client.ask.assert_called_once_with('Hello from a desktop fallback.',w.model.identity)
+        w.win.u.ShowWindow.assert_not_called()
+        w.win.u.SetForegroundWindow.assert_not_called()
 
     def test_voice_status_and_meter_stay_in_input_without_replacing_reply(self):
         w = self.use_real_chat_flow()

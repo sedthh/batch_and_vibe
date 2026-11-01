@@ -148,18 +148,21 @@ class SettingsWindow:
         refresh_vr()
         ttk.Button(vr_panel,text='Check again',command=refresh_vr).pack(anchor='w',pady=(6,14))
         ttk.Label(vr_panel,text='Enable voice in Voice settings. Use Push to talk with your chosen shortcut,\n'
-            'or turn it off for voice activation. VR leaves your choices unchanged.',wraplength=570).pack(anchor='w',pady=(0,8))
+            'or turn it off for voice activation. VR uses subtitles with no desktop chat box,\n'
+            'including when the game falls back to a desktop window.',wraplength=570).pack(anchor='w',pady=(0,8))
         voice_status=tk.StringVar()
         def refresh_voice_status(*_):
             voice='Voice input is disabled.' if not self.values['voice_enabled'].get() else (
                 'Voice input needs a speech model.' if not self.values['voice_model'].get().strip() else 'Voice input is enabled.')
             push_to_talk=('Push to talk: on ('+self.values['voice_hotkey'].get()+').' if self.values['voice_push_to_talk'].get()
                 else 'Push to talk: off (voice activation).')
-            voice_status.set(voice+'\n'+push_to_talk)
-        for name in ('voice_enabled','voice_model','voice_push_to_talk','voice_hotkey'):
+            review=('\nTranscript review is on. Enable Send transcript immediately in Voice for VR.'
+                if self.values['voice_enabled'].get() and not self.values['voice_auto_send'].get() else '')
+            voice_status.set(voice+'\n'+push_to_talk+review)
+        for name in ('voice_enabled','voice_model','voice_push_to_talk','voice_hotkey','voice_auto_send'):
             self.values[name].trace_add('write',refresh_voice_status)
         refresh_voice_status()
-        ttk.Label(vr_panel,textvariable=voice_status).pack(anchor='w',pady=(0,4))
+        ttk.Label(vr_panel,textvariable=voice_status,wraplength=570).pack(anchor='w',pady=(0,4))
         ttk.Button(vr_panel,text='Voice settings',command=lambda:tabs.select(1)).pack(anchor='w')
         tabs.add(limits, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
