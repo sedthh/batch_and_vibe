@@ -94,6 +94,9 @@ class VoiceTab:
             variable=self.push_to_talk,command=lambda:values['voice_push_to_talk'].set(self.push_to_talk.get()))
         self.push_to_talk_toggle.grid(row=panel.grid_size()[1],column=0,columnspan=2,sticky='w',pady=3)
         self.hotkey=field('hotkey', 'Hold to speak; release to transcribe', tuple(HOTKEYS))
+        ttk.Label(panel,text='Controller remapping: map a button to this key (hold/release).\n'
+            'F13-F24 are available. Direct VR controller binding is not supported.',
+            wraplength=570).grid(row=panel.grid_size()[1],column=0,columnspan=2,sticky='w',pady=(0,4))
         values['voice_push_to_talk'].trace_add('write',self.refresh_input_mode)
         self.refresh_input_mode()
         field('language', 'Language code (blank = auto, en = English)')

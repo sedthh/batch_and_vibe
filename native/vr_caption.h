@@ -37,6 +37,9 @@ inline bool valid_caption(const wchar_t* text) {
 
 inline std::wstring styled_caption(const wchar_t* text) {
     std::wstring result(text);
+    // Soft red (#FF8080), with the same reset used by the creature-name formatter.
+    if(result.rfind(L"[Voice error: ",0)==0 || result.rfind(L"[Model error: ",0)==0)
+        return L"$C8421631 "+result+L"$C0 ";
     const auto colon=result.find(L':');
     if(result.empty() || result[0]==L'[' || colon==std::wstring::npos || colon>48)return result;
     // Verified HelpText $C decimal BBGGRR command; $C0 restores the speaker

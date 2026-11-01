@@ -15,7 +15,10 @@ from urllib.parse import urlsplit
 import wave
 
 
-HOTKEYS = {'F11': (0x7A,), 'Ctrl+F11': (0x11, 0x7A)}
+# Extended function keys are useful targets for controller-to-keyboard mappers.
+HOTKEYS = {prefix+f'F{number}': modifiers+(0x6F+number,)
+           for prefix,modifiers in (('',()),('Ctrl+',(0x11,)))
+           for number in range(1,25)}
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,18 @@ def audio_clip(seconds=0.5, rate=16000):
 
 
 class SettingsTests(unittest.TestCase):
+    def test_extended_function_key_shortcuts_roundtrip(self):
+        from bwv.voice import HOTKEYS
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'settings.json'
+            for key,expected in (('F1',(0x70,)),('F13',(0x7C,)),('Ctrl+F24',(0x11,0x87))):
+                config=LLMConfig('fixture',voice=VoiceSettings(hotkey=key))
+                config.save(path)
+                self.assertEqual(LLMConfig.load(path).voice.hotkey,key)
+                self.assertEqual(HOTKEYS[key],expected)
+            for key in ('F0','F25','Ctrl+Enter','Escape','Oculus A'):
+                with self.assertRaises(ValueError):VoiceSettings(hotkey=key)
+
     def test_push_to_talk_defaults_and_form_roundtrip(self):
         self.assertTrue(VoiceSettings().push_to_talk)
         with TemporaryDirectory() as folder:

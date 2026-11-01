@@ -213,7 +213,7 @@ class OverlayWindow:
                 self.voice = VoiceOverlay(self, voice, settings_path)
                 self.voice_meter = VoiceInputMeter(self.input_box, font)
                 if voice.push_to_talk:
-                    binding = {'F11': '<F11>', 'Ctrl+F11': '<Control-F11>'}[voice.hotkey]
+                    binding = '<'+voice.hotkey.replace('Ctrl+','Control-')+'>'
                     self.entry.bind(binding, lambda event: 'break')
         self.win.own_style(self.hwnd,False)
         self.hotkey_thread=threading.Thread(target=hotkey_loop,
@@ -509,6 +509,8 @@ class OverlayWindow:
                             else:self.model.provider_error='chat_transport_failed'
                         self.notice=(self.model.send_failure_notice() if kind=='failed' else
                             '[Message not sent: the game session changed. Your text is kept.]')
+                        if kind=='failed' and getattr(self,'captions',None) is not None:
+                            self.captions.queue_model_error(self.model.provider_error or 'chat_transport_failed',submission.identity)
         # A scene lock or short read gap can hide identity. Keep the unsent
         # entry locally until the same creature returns; a verified different
         # recipient cancels queued delivery; never send an old command to it.

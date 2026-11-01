@@ -22,6 +22,9 @@ int main() {
     assert(!valid_caption(L"$C123 bad"));assert(!valid_caption(L"\\C123 bad"));
     assert(styled_caption(L"Bongo: Hello.")==L"$C8443903 Bongo:$C0  Hello.");
     assert(styled_caption(L"[Heard: Hello.]")==L"[Heard: Hello.]");
+    assert(styled_caption(L"[Voice error: Unavailable.]")==L"$C8421631 [Voice error: Unavailable.]$C0 ");
+    assert(styled_caption(L"[Model error: Unavailable.]")==L"$C8421631 [Model error: Unavailable.]$C0 ");
+    assert(styled_caption(L"[Voice: No speech recognized.]")==L"[Voice: No speech recognized.]");
     assert(styled_caption(L"Plain")==L"Plain");
     std::array<wchar_t,caption_units> long_text;long_text.fill(L'x');
     assert(!valid_caption(long_text.data()));

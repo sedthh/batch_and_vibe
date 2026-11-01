@@ -7,6 +7,7 @@ import time
 from .action_probe import COMMAND, submit
 from .overlay import OverlayModel
 from .pipe import snapshot
+from .errors import MESSAGES
 
 
 def voice_settings(settings):
@@ -44,10 +45,11 @@ class CaptionMirror:
     def __init__(self,reader=snapshot,sender=submit,clock=time.monotonic):
         self.model=OverlayModel();self.reader=reader;self.sender=sender;self.clock=clock
         self.key=None;self.pages=[];self.next_poll=0;self.status='waiting'
+        self.model_error=None
         self.voice_lock=threading.Lock();self.notice=None;self.last_notice=None
 
     def queue_voice_notice(self,text,identity):
-        # Only completed transcriptions/errors cross this UI-thread mailbox.
+        # Only completed transcriptions/errors cross this thread-safe mailbox.
         text=' '.join(caption_pages(text))
         if not text:return
         text='['+(text if len(text)<=238 else text[:235].rstrip()+'…')+']'
@@ -56,6 +58,13 @@ class CaptionMirror:
             if self.last_notice and self.last_notice[:2]==(identity,text) and now-self.last_notice[2]<30:return
             self.last_notice=(identity,text,now)
             self.notice=(identity,text,now+30)
+
+    def queue_model_error(self,code,identity):
+        # Fixed messages only: provider bodies and arbitrary error text stay private.
+        if not isinstance(code,str):code='internal_error'
+        if code in ('provider_busy','provider_cooldown','chat_unavailable','chat_cancelled','tool_context_unavailable'):
+            return
+        self.queue_voice_notice('Model error: '+MESSAGES.get(code,'Request failed; check the model settings.'),identity)
 
     def take_notice(self,now):
         with self.voice_lock:
@@ -66,12 +75,16 @@ class CaptionMirror:
     def update(self,payload):
         now=self.clock();self.model.update(payload,now)
         model=self.model
+        error=model.provider_error
+        changed_error=error!=self.model_error
+        self.model_error=error
         text=model.last_message or model.speech
         key=(model.identity,model.message_time,text,model.creature_name)
         if not model.can_send(now):
             self.pages=[]
             with self.voice_lock:self.notice=None
             self.key=key;self.status='scene_unavailable';return
+        if error and changed_error:self.queue_model_error(error,model.identity)
         if key!=self.key:
             self.key=key;self.pages=creature_pages(model.visible_speech(now),model.creature_name)
         if now<self.next_poll:return

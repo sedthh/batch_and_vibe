@@ -27,6 +27,28 @@ class Entry:
 
 
 class VoiceOverlayTests(unittest.TestCase):
+    def test_remapped_extended_key_holds_recording_and_releases_to_transcribe(self):
+        for shortcut,keys in (('F13',{0x7C}),('Ctrl+F24',{0x11,0x87})):
+            self.setUp();self.v.config=replace(self.v.config,hotkey=shortcut)
+            if len(keys)>1:
+                self.keys.add(0x87);self.v.tick();self.service.start.assert_not_called()
+            self.keys.update(keys);self.v.tick()
+            self.service.start.assert_called_once()
+            self.v.tick();self.service.start.assert_called_once()
+            self.keys.clear();self.v.tick()
+            self.assertTrue(self.v.job.released.is_set())
+
+    def test_extended_shortcuts_bind_in_desktop_entry_without_special_case_lookup(self):
+        from bwv.llm import LLMConfig
+        widgets={name:Mock() for name in ('Tk','Frame','Label','Text','Scrollbar','Entry','Button')}
+        for shortcut,binding in (('F13','<F13>'),('Ctrl+F24','<Control-F24>')):
+            with patch.multiple('tkinter',**widgets),patch('bwv.overlay_windows.Windows'), \
+                    patch('bwv.overlay_windows.threading.Thread'), \
+                    patch('bwv.llm.LLMConfig.load',return_value=LLMConfig('fixture',voice=VoiceSettings(enabled=True,hotkey=shortcut))), \
+                    patch('bwv.voice_overlay.VoiceOverlay'),patch('bwv.voice_overlay.VoiceInputMeter'):
+                window=OverlayWindow(Mock(),settings_path='unused')
+                self.assertIn(binding,[call.args[0] for call in window.entry.bind.call_args_list])
+
     def test_vr_notices_ignore_live_phases_and_report_error_once(self):
         self.w.captions=Mock()
         self.press()
@@ -283,7 +305,9 @@ class VoiceOverlayTests(unittest.TestCase):
 
     def test_failed_voice_send_unlocks_original_transcript_for_editing(self):
         w = self.use_real_chat_flow()
+        w.captions=Mock();identity=w.model.identity
         w.client.ask.side_effect = OSError('fixture connection failed')
+        w.client.state.side_effect = OSError('fixture service unavailable')
         self.press(); self.release(); self.event('voice_text', 'Gyere ide!')
         self.assertEqual(w.entry.state, 'disabled')
         w.tick(); w.tick()
@@ -291,6 +315,7 @@ class VoiceOverlayTests(unittest.TestCase):
         self.assertEqual((w.entry.get(), w.entry.state), ('Gyere ide!', 'normal'))
         self.assertTrue(w.expanded)
         w.client.ask.assert_called_once()
+        w.captions.queue_model_error.assert_called_once_with('chat_transport_failed',identity)
 
 
 class VoiceMeterTests(unittest.TestCase):

@@ -123,7 +123,9 @@ Run `Setup-Mod.cmd` again if microphone support is missing. Choose your micropho
 with **Refresh**, or leave it blank for the Windows default. Allow microphone access
 for desktop apps in Windows settings. **Save & apply** reloads voice settings too.
 
-In the game, hold **F11**, speak, and release. The input field shows **[Listening]**
+In the game, hold **F11** (the default), speak, and release. Voice settings let you
+choose **F1-F24**, with optional **Ctrl**. Controller-to-keyboard remapping can
+target these shortcuts; see [VR input setup](vr.md). The input field shows **[Listening]**
 with a volume bar that grows as you speak louder, then **[Transcribing]**.
 The creature's reply stays visible above it. The words it heard then replace the
 status in the normal chat input.

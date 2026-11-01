@@ -23,6 +23,53 @@ def payload(now=100,text='Hello there.'):
 
 
 class VrTests(unittest.TestCase):
+    def test_model_failure_is_shown_once_until_recovery_even_across_ticks(self):
+        native=state();native['action_probe']['vr_caption']['notices']=True
+        sender=Mock();clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        def update(error):
+            data=payload(now=clock[0],text='')
+            data['runtime']['provider']={'last_error':error}
+            mirror.update(data)
+        update('authentication_failed')
+        text=sender.call_args.args[1][40:].decode('utf-16-le').rstrip('\0')
+        self.assertEqual(text,'[Model error: Model authentication failed; check API key settings]')
+        for now in (102,110,140,180):
+            clock[0]=now;update('authentication_failed')
+        self.assertEqual(sender.call_count,1)
+        clock[0]=182;update(None)
+        clock[0]=184;update('authentication_failed')
+        self.assertEqual(sender.call_count,2)
+
+    def test_model_error_waits_for_dialogue_and_duplicate_direct_failure_is_suppressed(self):
+        native=state();native['action_probe']['vr_caption'].update(notices=True,busy=True)
+        sender=Mock();clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        data=payload(text='');data['runtime']['last_chat_error']='request_timeout'
+        mirror.update(data)
+        mirror.queue_model_error('request_timeout',mirror.model.identity)
+        sender.assert_not_called()
+        native['action_probe']['vr_caption']['busy']=False
+        clock[0]=102;data['source']['observation']['observed_at']=102;mirror.update(data)
+        self.assertEqual(sender.call_count,1)
+        self.assertIn('Model reply timed out',sender.call_args.args[1][40:].decode('utf-16-le'))
+
+    def test_model_error_text_is_curated_and_hidden_scene_errors_are_not_replayed(self):
+        native=state();native['action_probe']['vr_caption']['notices']=True
+        sender=Mock();clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        mirror.update(payload(text=''))
+        mirror.queue_model_error('secret-provider-response',mirror.model.identity)
+        notice=mirror.take_notice(100)
+        self.assertIn('Request failed',notice);self.assertNotIn('secret',notice)
+        for code in ('provider_busy','provider_cooldown','chat_cancelled'):
+            mirror.queue_model_error(code,mirror.model.identity)
+            self.assertEqual(mirror.take_notice(100),'')
+        data=payload(text='');data['runtime']['provider']={'last_error':'connection_failed'}
+        data['source']['observation']['cutscene']=True;mirror.update(data)
+        clock[0]=102;data['source']['observation'].update(observed_at=102,cutscene=False)
+        mirror.update(data);sender.assert_not_called()
+
     def test_name_prefix_repeats_on_every_page_and_cannot_add_engine_commands(self):
         pages=creature_pages('Hello '*100,'Bongo$C123\\C4')
         self.assertGreater(len(pages),1)

@@ -33,6 +33,14 @@ the configured keyboard shortcut, or turn it off for voice activation.
 The VR tab shows a reminder when voice is disabled or a speech model is missing.
 Starting VR does not change voice input or transcript sending preferences.
 
+Push-to-talk shortcuts support **F1-F24**, with optional **Ctrl**. A compatible
+controller-to-keyboard mapper can map a spare button to the selected shortcut:
+send key-down while held and key-up when released. F13-F24 provide additional
+binding targets. Choose a shortcut unused by the game and other applications;
+the mod does not suppress the game's keyboard input. Direct Oculus/Quest button
+binding is not supported. Remapping depends on the mapper and VR runtime and
+still needs headset testing; voice activation needs neither.
+
 From this repository, with every game instance closed:
 
 ```powershell
@@ -95,15 +103,20 @@ pending text. Incoming text is restricted to plain BMP characters; unsupported
 emoji and engine commands are removed. Only the bridge's fixed name formatter
 adds the game's verified colour commands.
 
-Completed transcriptions appear once as `[Heard: ...]`; voice errors also get
-one short notice. These wait until the current subtitle finishes and remain for
+Completed transcriptions appear once as `[Heard: ...]`. Voice and model/API
+failures appear as `[Voice error: ...]` or `[Model error: ...]` in soft red,
+then restore the game's normal text colour. Error messages use fixed descriptions,
+never raw provider responses or credentials. These notices wait until the current subtitle finishes and remain for
 four seconds. Long transcriptions are shortened only for display; the full text
 is still sent to chat. Repeated identical notices are suppressed for 30 seconds,
-and notices delayed more than 30 seconds are dropped. There are no live listening,
+and notices delayed more than 30 seconds are dropped. A persistent model error
+is announced once until it clears or changes, rather than on every thinking tick.
+There are no live listening,
 transcribing, or sent-status subtitles, and no periodic subtitle refresh: the
 game clears and redraws text when it changes, which causes visible blinking.
 Fix microphone/provider errors and use **Save & apply** to restart voice input.
-An updated bridge is required for notices; older bridges can still show replies.
+Rebuild and install the updated bridge for error colours; earlier notice-capable
+bridges show the same errors in the normal subtitle colour.
 
 Story dialogue and existing native help take priority. Captions may wait or be
 skipped while that interface is occupied. This experiment does not add a VR
