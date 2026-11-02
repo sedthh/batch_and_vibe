@@ -21,7 +21,8 @@ SPECIES = {b'Ape creature': 'monkey', b'Cow creature': 'cow', b'Tiger creature':
     b'Horse creature': 'horse', b'Tortoise creature': 'tortoise', b'Zebra creature': 'zebra',
     b'Bear creature': 'bear', b'Polar bear creature': 'polar bear',
     b'Nice sheep creature': 'sheep', b'Chimp creature': 'chimp',
-    b'Ogre creature': 'ogre', b'Mandrill creature': 'mandrill'}
+    b'Ogre creature': 'ogre', b'Mandrill creature': 'mandrill',
+    b'Rhino creature': 'rhino', b'Gorilla creature': 'gorilla'}
 
 
 class CreatureReadError(ValueError):

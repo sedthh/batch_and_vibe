@@ -168,7 +168,7 @@ class IslandProjectionTests(TestCase):
         second=preview_prompt(replace(obs,island=replace(island,gods=moved)),None)
         self.assertEqual(first.system,second.system)
         self.assertNotEqual(first.context_json,second.context_json)
-        roster=json.loads(first.system.split('## Current island gods and registered creatures (data)\n\n')[1])
+        roster=json.loads(first.system.split('## Current island gods and registered creatures (data)\n\n')[1].splitlines()[0])
         self.assertEqual(roster['god_count'],3)
         self.assertNotIn('hand',roster['gods'][1])
         compact=summarize_context(json.loads(second.context_json),asdict(replace(obs,island=replace(island,gods=moved))))

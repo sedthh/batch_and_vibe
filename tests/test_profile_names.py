@@ -53,7 +53,7 @@ class ProfileNameTests(TestCase):
             self.assertEqual(json.loads(prompt.context_json),{})
             if names==ProfileNames():self.assertNotIn(PROMPT_PREFIX,prompt.system)
             else:
-                data=json.loads(prompt.system.split(PROMPT_PREFIX)[1])
+                data=json.loads(prompt.system.split(PROMPT_PREFIX)[1].splitlines()[0])
                 self.assertEqual(set(data),{key for key,value in vars(names).items() if value})
         initial=with_profile_names('System',ProfileNames('Guide','Pebble'))
         renamed=with_profile_names(initial,ProfileNames('Guide','Fern'))

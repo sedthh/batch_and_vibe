@@ -190,6 +190,9 @@ Want to help build or test it? See [contributing](docs/contributing.md).
 
 New to the game? Watch [Black & White: Playing God With a Giant Cow](https://www.youtube.com/watch?v=qelivOEUZfY).
 For its history, see Noclip's [Why has Black & White Been Abandoned?](https://www.youtube.com/watch?v=GtNvEna6bxc).
+Special thanks to raffclar for the [Creature Mind AI write-up](https://blog.zanidrak.com/ai/games/black-and-white/2026/10/27/creature-mind-part-1.html),
+and to the [openblack](https://github.com/openblack/openblack) and
+[bw1-decomp](https://github.com/openblack/bw1-decomp) contributors for their research.
 
 The [MIT license](LICENSE) covers the original mod code, not Black & White.
 This project is not affiliated with or endorsed by Lionhead Studios or the game's rights holders.
