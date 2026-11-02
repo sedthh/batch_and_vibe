@@ -94,11 +94,12 @@ class OverlayClient:
             return self.pipe.call('state')
         return self._json(Request(self.base+'overlay-state',headers={'Cache-Control':'no-cache'}),1)
 
-    def ask(self, text, identity):
+    def ask(self, text, identity, *, voice_recording=None):
         text = validate_question(text)
         if not isinstance(identity,tuple) or len(identity)!=2 or not all(isinstance(x,str) and x for x in identity):
             raise ValueError('Current creature identity required')
         payload = {'question':text,'expected_identity':list(identity)}
+        if voice_recording is not None:payload['voice_recording']=voice_recording
         if self.pipe is not None:
             return self.pipe.call('question', payload, timeout=1200)
         body = json.dumps(payload).encode('utf-8')
@@ -121,6 +122,7 @@ class ChatSubmission:
     deadline: float
     sending: bool = False
     next_attempt: float = 0
+    voice_recording: dict | None = None
 
     def readiness(self, model, now):
         if model.identity is not None and model.identity!=self.identity:return 'changed'

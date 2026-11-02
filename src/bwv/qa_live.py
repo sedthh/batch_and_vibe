@@ -128,7 +128,7 @@ class LiveDummyProvider(DemoProvider):
 class LiveChatRuntime:
     def __init__(self, state_dir=None, *, clock=time.monotonic, names_reader=None, provider=None,
                  settings=None, settings_path=None, action_factory=None, wake_factory=None, wait_actions=False,
-                 request_details=None, thinking_pause_factory=None):
+                 request_details=None, thinking_pause_factory=None, music_reader=None):
         self.loop = asyncio.get_running_loop()
         self.clock = clock
         self.request_details = request_details
@@ -147,9 +147,14 @@ class LiveChatRuntime:
         self.mode = 'live_llm_chat' if self.is_llm else 'live_dummy_preview'
         self.config = provider.config if self.is_llm else None
         self.settings=settings or self.config
+        root = Path(state_dir) if state_dir is not None else default_memory_path().parent/('live-llm' if self.is_llm else 'live-dummy')
+        from .music import MusicMonitor
+        self.music = MusicMonitor(enabled=bool(self.settings and self.settings.winamp_music),
+                                  reader=music_reader, clock=clock, history_path=root/'music-history.json',
+                                  lyrics_online=bool(self.settings and self.settings.music_lyrics_online),
+                                  lyrics_cache_dir=root/'music-lyrics')
         self.settings_path=Path(settings_path) if settings_path is not None else None
         self.prompt_settings=self.settings.prompts if self.settings else DEFAULT_PROMPTS
-        root = Path(state_dir) if state_dir is not None else default_memory_path().parent/('live-llm' if self.is_llm else 'live-dummy')
         if self.is_llm:
             from .token_usage import TokenUsage
             provider.token_usage=TokenUsage(root/'token-usage.json')
@@ -184,7 +189,8 @@ class LiveChatRuntime:
             action_factory=self.action_factory,
             on_question=self._question_action if wake_factory or self.pending_actions else None,
             wake_followup_actions=self.pending_actions is not None,session_greetings=True,
-            wait_for_context=self._wait_for_turn_context,thinking_pause_factory=thinking_pause_factory)
+            wait_for_context=self._wait_for_turn_context,thinking_pause_factory=thinking_pause_factory,
+            music_context=self.music.snapshot,music_lyrics=self.music.add_lyric_match)
         self.broker.speech.reenable_cut_content = self.settings.reenable_cut_content if self.settings else True
         self.updates = self._new_updates()
         self.automatic = not self.is_llm
@@ -434,6 +440,11 @@ class LiveChatRuntime:
         if question is not None and self.question_scene_blocked():raise ValueError(self.question_scene_blocked())
         system, current = current_prompt(obs,now,question=question,blockers=blockers,
                                          prompt_settings=self.prompt_settings)
+        if self.music.enabled:
+            current['music'] = self.music.snapshot()
+            source = (self.source or {}) if 'context_unavailable' not in current else {}
+            native = deepcopy(((source.get('observation') or {}).get('experience') or {}).get('music') or {})
+            if native:current['native_music'] = native
         if self.source is not None and 'context_unavailable' not in current:
             context = deepcopy(self.source['prompt']['context'])
             # This runtime has no engine capability catalog or executor.
@@ -468,6 +479,8 @@ class LiveChatRuntime:
         from .island import with_island_roster
         if 'context_unavailable' not in current:
             system = with_island_roster(system, ((self.source or {}).get('observation') or {}).get('island'))
+        from .music_context import compact_music_turn
+        compact_music_turn(current)
         return system, current
 
     def _cancel_automatic(self, *, include_forced=True):
@@ -492,7 +505,15 @@ class LiveChatRuntime:
         self.broker.speech.publish(error_banner(code),self.clock(),{'candidate':None},source='error')
         self.publish()
 
+    async def _poll_music(self):
+        obs = self.gate.observation
+        if self.source is not None and obs and obs.connected and obs.creature_id:
+            await self.music.poll()
+        else:
+            self.music.clear()
+
     async def step(self):
+        await self._poll_music()
         now = self.clock()
         status = self.gate.poll(now)
         obs = self.gate.observation or ControlObservation('disconnected',0,now)
@@ -598,15 +619,23 @@ class LiveChatRuntime:
 
     async def _question(self, payload):
         if (type(payload) is not dict or 'question' not in payload
-                or not payload.keys() <= {'question','expected_identity'}):
+                or not payload.keys() <= {'question','expected_identity','voice_recording'}):
             raise ValueError('Invalid question')
         from .conversation import validate_question
         validate_question(payload['question'])
+        recording=payload.get('voice_recording')
+        if recording is not None:
+            if (type(recording) is not dict or set(recording)!={'started_at','ended_at'}
+                    or any(type(v) not in (int,float) or not math.isfinite(v) for v in recording.values())
+                    or not 0 <= recording['started_at'] < recording['ended_at'] <= self.clock()+1
+                    or recording['ended_at']-recording['started_at'] > 301):
+                raise ValueError('Invalid voice recording timing')
         if 'expected_identity' in payload:
             expected = payload['expected_identity']
             if (type(expected) is not list or len(expected)!=2
                     or not all(isinstance(v,str) and v for v in expected)):
                 raise ValueError('Invalid expected creature identity')
+        await self._poll_music()
         try:
             await self._wait_for_context()
         except ToolContextUnavailable:
@@ -624,7 +653,9 @@ class LiveChatRuntime:
         # Explicit questions take priority over obsolete automatic work.
         self._cancel_automatic()
         try:
-            reply = await self.broker.ask(payload['question'])
+            music_window = self.music.during_recording(recording['started_at'],recording['ended_at']) if recording else None
+            extra={'music_during_recording':music_window} if music_window is not None else {}
+            reply = await self.broker.ask(payload['question'],**extra)
         except asyncio.CancelledError:
             if asyncio.current_task().cancelling():raise
             raise ValueError('Chat cancelled because the creature or game is unavailable') from None
@@ -811,6 +842,7 @@ class LiveChatRuntime:
             'question_unavailable':self.question_scene_blocked(),
             'memory':memory,'speech':self.broker.speech.snapshot(now),
             'answer_status':self.broker.answer_status(now),
+            'music':self.music.snapshot(),
             'reset_available':self.reset_available(),
             'force_tick_unavailable':self.force_tick_unavailable(current['snapshot']),
             'dialogue':list(self.dialogue),
@@ -900,6 +932,7 @@ class LiveChatRuntime:
         return handle
 
     async def close(self):
+        self.music.close()
         self._cancel_pending('cancelled_shutdown')
         self._cancel_automatic()
         await self.broker.close()
@@ -912,10 +945,10 @@ class LiveChatRuntime:
 class LiveDummyRuntime(LiveChatRuntime):
     """Retain the fixed offline/live QA entry point with no network provider."""
     def __init__(self, state_dir=None, *, clock=time.monotonic, names_reader=None, settings=None, settings_path=None,
-                 action_factory=None, wake_factory=None):
+                 action_factory=None, wake_factory=None, music_reader=None):
         super().__init__(state_dir, clock=clock, names_reader=names_reader,
                          settings=settings,settings_path=settings_path,action_factory=action_factory,
-                         wake_factory=wake_factory)
+                         wake_factory=wake_factory,music_reader=music_reader)
 
 
 async def serve(source_url, port=0, seconds=43200, *, state_dir=None, token=None, config=None,

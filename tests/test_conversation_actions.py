@@ -29,6 +29,23 @@ class DelayedReply:
 
 
 class ConversationActionsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_music_and_singing_words_do_not_block_commands_or_automatic_turns(self):
+        self.broker.music_context=lambda:{'source':'winamp','state':'playing','title':'Paper Moon'}
+        self.provider.release.set()
+        self.provider.reply={'answer':'Hello.', 'decision':{'candidate':None}}
+        await self.broker.ask("I'm singing along")
+        self.provider.reply=self.reply
+        await self.broker.ask('Come to me')
+        self.assertEqual(len(self.sent),1)
+        self.assertEqual(COMMAND.unpack(self.sent[-1])[1],2)
+        for request in self.provider.requests:
+            self.assertNotIn('lyric_sharing',request.current)
+            self.assertEqual(request.current['music_at_submission']['title'],'Paper Moon')
+        self.state['action_probe'].update(phase='ready',engine_calls=0)
+        await self.broker.choose(PlanningRequest(self.gate.issue(self.now),self.gate.observation.candidates,None))
+        self.assertEqual(self.provider.requests[-1].kind,'observation')
+        self.assertEqual(len(self.sent),2)
+
     async def test_only_direct_questions_mark_physical_actions_as_player_commands(self):
         from bwv.action_probe import PLAYER_COMMAND_FLAG
         self.state['action_probe']['player_command_priority']={'version':1,'available':True}

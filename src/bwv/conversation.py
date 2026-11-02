@@ -433,6 +433,8 @@ class _Entry:
     planning_request: object = None
     wake_result: dict | None = None
     received_at: str | None = None
+    music_at_submission: dict | None = None
+    music_during_recording: dict | None = None
 
 
 class ConversationBroker:
@@ -444,7 +446,8 @@ class ConversationBroker:
     def __init__(self, provider, gate, *, clock=time.monotonic, timeout=30,
                  max_questions=8, memory=None, speech_seconds=15, prompt_builder=current_prompt,
                  on_turn=None, action_factory=None, on_question=None, wake_followup_actions=False,
-                 session_greetings=False, wait_for_context=None, thinking_pause_factory=None):
+                 session_greetings=False, wait_for_context=None, thinking_pause_factory=None,
+                 music_context=None, music_lyrics=None):
         if not math.isfinite(timeout) or timeout <= 0 or type(max_questions) is not int or max_questions < 1:
             raise ValueError('Invalid conversation limits')
         self.provider, self.gate, self.clock = provider, gate, clock
@@ -452,6 +455,8 @@ class ConversationBroker:
         self.on_turn = on_turn
         self.wait_for_context = wait_for_context
         self.thinking_pause_factory = thinking_pause_factory
+        self.music_context = music_context
+        self.music_lyrics = music_lyrics
         self.thinking_pause_status = 'not_requested'
         # First integration is explicit-question QA only. Automatic planner
         # proposals still belong to their own executor and must not execute twice.
@@ -570,7 +575,7 @@ class ConversationBroker:
             self._epoch+=1  # A late reply stays invalid even after leaving the menu.
             entry.future.cancel()
 
-    async def ask(self, text):
+    async def ask(self, text, *, music_during_recording=None):
         text = validate_question(text)
         received_at = timestamp(utc_now())
         unavailable = question_unavailable(self.gate.observation,self.clock())
@@ -588,7 +593,14 @@ class ConversationBroker:
             wake_result = self.on_question(self.gate.observation)
             self.last_wake = wake_result
         future = asyncio.get_running_loop().create_future()
-        self._questions.append(_Entry(future,self._epoch,text,wake_result=wake_result,received_at=received_at))
+        music = self.music_context() if self.music_context else None
+        if music and music.get('state') == 'disabled':music = None
+        music=deepcopy(music)
+        music_during_recording=deepcopy(music_during_recording)
+        if self.music_lyrics:self.music_lyrics(text,music,music_during_recording)
+        self._questions.append(_Entry(future,self._epoch,text,wake_result=wake_result,received_at=received_at,
+                                      music_at_submission=deepcopy(music),
+                                      music_during_recording=deepcopy(music_during_recording)))
         self._start()
         return await future
 
@@ -651,6 +663,12 @@ class ConversationBroker:
                             if (t.object_id,t.instance_id,t.kind,t.candidate) in offered))
                 system, current = self.prompt_builder(obs,now,question=entry.question,
                                                      blockers=status.reasons if entry.question else ())
+                if entry.music_at_submission is not None:
+                    current['music_at_submission'] = entry.music_at_submission
+                if entry.music_during_recording is not None:
+                    current['music_during_recording'] = entry.music_during_recording
+                from .music_context import compact_music_turn
+                compact_music_turn(current)
                 if entry.question is None and not current['snapshot']:
                     entry.future.set_result(None)
                     continue

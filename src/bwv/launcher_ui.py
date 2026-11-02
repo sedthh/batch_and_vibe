@@ -49,6 +49,8 @@ def save_basics(path, values, key='', *, voice_key=''):
     if 'reenable_cut_content' in values:
         data['reenable_cut_content'] = values['reenable_cut_content']
     if 'vr_mode' in values:data['vr_mode']=values['vr_mode']
+    if 'winamp_music' in values:data['winamp_music']=values['winamp_music']
+    if 'music_lyrics_online' in values:data['music_lyrics_online']=values['music_lyrics_online']
     from .voice_settings_ui import voice_form_values
     data['voice'].update(voice_form_values(values))
     for field in ('model', 'api', 'base_url', 'output_format', 'token_parameter'):
@@ -143,7 +145,7 @@ class SettingsWindow:
         def refresh_vr(*_):
             from .vr_install import configured_folder,installation_error
             error=installation_error(configured_folder(self.path,game_root))
-            self.vr_status.set((error+'\nInstall BW1-VR in the selected game folder to enable the VR launch button.')
+            self.vr_status.set((error+'\nSettings can still be saved. Install BW1-VR in the selected game folder to enable the VR launch button.')
                 if error else 'BW1-VR detected. Use Run B&W VR in the start window, then Play in VR.')
         refresh_vr()
         ttk.Button(vr_panel,text='Check again',command=refresh_vr).pack(anchor='w',pady=(6,14))
@@ -236,6 +238,25 @@ class SettingsWindow:
                             ('jitter_percent', 'Timing randomness (%)')):
             field(cadence, name, label, source=config['cadence'])
         field(cadence, 'event_cooldown_seconds', 'Important-event cooldown (seconds)')
+        music_panel = ttk.Frame(tabs, padding=12); tabs.add(music_panel, text='Music')
+        self.values['winamp_music'] = tk.BooleanVar(value=config['winamp_music'])
+        ttk.Checkbutton(music_panel, text='Connect to Winamp',
+                        variable=self.values['winamp_music']).pack(anchor='w')
+        self.values['music_lyrics_online'] = tk.BooleanVar(value=config['music_lyrics_online'])
+        ttk.Checkbutton(music_panel, text='Look up missing lyrics online (LRCLIB)',
+                        variable=self.values['music_lyrics_online']).pack(anchor='w',pady=(6,0))
+        ttk.Label(music_panel,text='Sends artist, title and duration to LRCLIB; caches lyrics locally.\n'
+            'Only short excerpts reach the creature. Audio and your words are not sent to LRCLIB.',
+            wraplength=570).pack(anchor='w',pady=(4,0))
+        ttk.Label(music_panel, text='Keep Winamp and the original Black & White MP3 add-on in charge of playback\n'
+            'and native creature reactions. This adds playback and native music context.\n\n'
+            'Talk or sing through your usual voice input, or type normally. There are no\n'
+            'special phrases or modes. Commands and automatic thinking work as usual.\n\n'
+            'When enabled, track tags, timing, listening history, short lyric excerpts and\n'
+            'native music readings enter chat context and may appear in saved memories.\n'
+            'Local MP3 tags are read; playback audio is not uploaded. Voice input uses your\n'
+            'separate speech settings. Only one running Winamp instance is supported.',
+            wraplength=570).pack(anchor='w', pady=(12,0))
         ttk.Label(frame, text='The general prompt and other settings are saved locally in settings.json.').pack(anchor='w', pady=10)
         self.error = tk.StringVar()
         ttk.Label(frame, textvariable=self.error, foreground='#b00020', wraplength=570).pack(anchor='w')

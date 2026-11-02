@@ -10,7 +10,8 @@ from .world_actions import held_miracle_context
 def inspect_self_frame(frame):
     raw = frame.get('observation') or {}
     context = frame['prompt']['context']
-    compact = context if any(k in context for k in ('self', 'activity', 'events')) else summarize_context(context, raw)
+    compact = context if any(k in context for k in ('self', 'activity', 'events')) else summarize_context(
+        context, raw, probe=(frame.get('diagnostics') or {}).get('action_probe'))
     old = inspect_self(raw, context)
     creature = deepcopy(compact.get('self') or {})
     body = old.get('body_engine_units')

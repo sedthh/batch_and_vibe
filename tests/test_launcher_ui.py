@@ -21,6 +21,21 @@ def form(config):
 
 
 class SettingsFormTests(unittest.TestCase):
+    def test_winamp_opt_in_round_trips_and_rejects_non_boolean_values(self):
+        with TemporaryDirectory() as folder:
+            path=Path(folder)/'settings.json';config=LLMConfig('fixture');config.save(path)
+            self.assertFalse(config.winamp_music)
+            values=form(config);values['winamp_music']=True
+            self.assertTrue(save_basics(path,values).winamp_music)
+            self.assertTrue(LLMConfig.load(path).winamp_music)
+            self.assertFalse(config.music_lyrics_online)
+            values['music_lyrics_online']=True
+            self.assertTrue(save_basics(path,values).music_lyrics_online)
+            self.assertTrue(LLMConfig.load(path).music_lyrics_online)
+            for value in ('true',1,None):
+                with self.assertRaises(ValueError):LLMConfig('fixture',winamp_music=value)
+                with self.assertRaises(ValueError):LLMConfig('fixture',music_lyrics_online=value)
+
     def test_message_cap_form_accepts_blank_and_positive_whole_numbers(self):
         with TemporaryDirectory() as folder:
             path=Path(folder)/'settings.json';config=LLMConfig('fixture');config.save(path)

@@ -141,6 +141,17 @@ class VoiceOverlayTests(unittest.TestCase):
         self.assertEqual(self.w.submission.text, 'Cast wood')
         self.assertEqual(self.w.entry.get(), 'Cast wood')
 
+    def test_recording_times_follow_review_and_are_dropped_for_replaced_text(self):
+        self.v.config=replace(self.v.config,auto_send=False)
+        self.press();self.release()
+        self.v.job.audio_started_at=90;self.v.job.audio_ended_at=95
+        self.event('voice_text','My boots are clouds')
+        self.w.submit()
+        self.assertEqual(self.w.submission.voice_recording,{'started_at':90,'ended_at':95})
+        self.w.pending=False;self.w.submission=None;self.w.entry.text='Come to me'
+        self.w.submit()
+        self.assertIsNone(self.w.submission.voice_recording)
+
     def test_hungarian_transcript_reaches_chat_and_display_unchanged(self):
         words = 'Gyere ide, és segíts a falusiaknak! Ők kérnek fát.'
         self.press(); self.release(); self.event('voice_text', words)

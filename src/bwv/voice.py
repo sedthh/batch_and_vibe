@@ -332,6 +332,12 @@ class Recording:
     released: threading.Event
     cancelled: threading.Event
     level: float = 0.0
+    audio_started_at: float | None = None
+    audio_ended_at: float | None = None
+
+    def timing(self):
+        if self.audio_started_at is None or self.audio_ended_at is None:return None
+        return {'started_at':self.audio_started_at, 'ended_at':self.audio_ended_at}
 
 
 class VoiceInput:
@@ -367,8 +373,19 @@ class VoiceInput:
                 audio = self.recorder(self.config, job.released, job.cancelled,
                     lambda: self.emit('voice_status', (job, 'Listening')),
                     on_level=lambda level: setattr(job, 'level', level))
+                captured_at = time.monotonic()
                 if job.cancelled.is_set(): return
                 if not audio:return  # Voice activation heard no complete phrase.
+                # The WAV contains only the retained phrase in activation mode,
+                # not the idle microphone wait. This is approximate capture time,
+                # independent of later transcription or review delays.
+                try:
+                    with wave.open(io.BytesIO(audio), 'rb') as clip:
+                        duration = clip.getnframes()/clip.getframerate()
+                    if 0 < duration <= self.config.max_recording_seconds+1:
+                        job.audio_started_at = captured_at-duration
+                        job.audio_ended_at = captured_at
+                except (ValueError, wave.Error, EOFError, ZeroDivisionError):pass
                 if self.diagnostics.enabled:
                     from .voice_diagnostics import audio_summary
                     try: self.details['audio'] = audio_summary(audio)

@@ -23,6 +23,10 @@ or replaced.
 
 VR controls are disabled when the selected folder lacks `runblack.exe`,
 `Black & White VR Mod.exe`, `ddraw.dll`, or `openxr_loader.dll`. **Settings > VR**
+does not prevent saving settings, even if VR was detected previously and later
+became unavailable. In that case, Save & apply uses desktop mode and preserves
+the saved VR preference; only launching VR requires the missing files.
+The panel
 names missing files. After installing BW1-VR, use **Check again**
 in settings; the start window also rechecks automatically. This detects the
 installation files, not a connected headset or a working OpenXR runtime.

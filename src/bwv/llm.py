@@ -52,6 +52,8 @@ class LLMConfig:
     wake_on_question: bool = False
     reenable_cut_content: bool = True
     vr_mode: bool = False
+    winamp_music: bool = False
+    music_lyrics_online: bool = False
     prompts: PromptSettings = field(default_factory=PromptSettings)
     voice: VoiceSettings = field(default_factory=VoiceSettings)
 
@@ -66,6 +68,10 @@ class LLMConfig:
             raise ValueError('reenable_cut_content must be a boolean')
         if type(self.vr_mode) is not bool:
             raise ValueError('VR mode must be a boolean')
+        if type(self.winamp_music) is not bool:
+            raise ValueError('winamp_music must be a boolean')
+        if type(self.music_lyrics_online) is not bool:
+            raise ValueError('music_lyrics_online must be a boolean')
         if isinstance(self.prompts,dict):
             object.__setattr__(self,'prompts',PromptSettings.parse(self.prompts))
         if not isinstance(self.prompts,PromptSettings):
