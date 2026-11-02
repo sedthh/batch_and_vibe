@@ -1,4 +1,4 @@
 """Original-code tooling for the experimental Black & White AI bridge."""
 
-__version__ = "1.4.1"
+__version__ = "1.5.0"
 
