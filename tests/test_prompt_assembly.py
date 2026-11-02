@@ -8,6 +8,9 @@ import httpx
 
 from bwv.bridge_prompt import ACTION_FEEDBACK_GUIDANCE, SPEECH_GUIDANCE
 from bwv.conversation import current_prompt, model_system_prompt, REPLY_FORMAT
+from bwv.creature import CreatureContext
+from bwv.prompt_cache import system_parts
+from bwv.species_prompts import SPECIES_NOTES, UNKNOWN_SPECIES_NOTE
 from bwv.llm import LLMConfig, LLMProvider, WIRE_CONTRACT
 from bwv.llm_context import CONTEXT_CONTRACT
 from bwv.prompt import ACTION_CONTRACT
@@ -21,6 +24,28 @@ from test_world_actions import WorldHarness
 
 
 class PromptAssemblyTests(unittest.IsolatedAsyncioTestCase):
+    def test_species_note_follows_current_form_and_keeps_cached_rules_stable(self):
+        from bwv.creature_live import SPECIES
+        self.assertEqual(set(SPECIES.values()), set(SPECIES_NOTES))
+        stable_rules = None
+        for species in (*SPECIES_NOTES, 'unknown form', None):
+            with self.subTest(species=species):
+                creature = CreatureContext(species, 'engine' if species else 'unknown')
+                observation = replace(playable(), creature=creature)
+                system, context = current_prompt(observation, 0, question='Hello')
+                stable, data = system_parts(model_system_prompt(system))
+                if stable_rules is None:
+                    stable_rules = stable
+                self.assertEqual(stable, stable_rules)
+                note = SPECIES_NOTES.get(species, UNKNOWN_SPECIES_NOTE)
+                self.assertEqual(data.count(note), 1)
+                for other in (set(SPECIES_NOTES.values()) | {UNKNOWN_SPECIES_NOTE}) - {note}:
+                    self.assertNotIn(other, system)
+                self.assertNotIn('species_note', json.dumps(context))
+        stale, _ = current_prompt(replace(playable(),
+            creature=CreatureContext('tiger', 'engine')), 10)
+        self.assertNotIn('species_note', stale)
+
     async def test_provider_has_one_output_contract_with_and_without_tool_rounds(self):
         for api in ('responses', 'chat_completions'):
             for rounds in (0, 6):

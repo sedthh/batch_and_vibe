@@ -8,6 +8,7 @@ from bwv.holding import HoldingContext
 from bwv.leash import LeashContext
 from bwv.miracle import HealKnowledge, MiracleContext
 from bwv.prompt import preview_prompt, SYSTEM
+from bwv.species_prompts import UNKNOWN_SPECIES_NOTE
 from bwv.training import TrainingContext, TrainingFeedback
 from bwv.updates import ContextUpdates
 from bwv.surroundings import NearbyObject, SurroundingsContext
@@ -28,7 +29,10 @@ class CompactContextTests(unittest.TestCase):
         self.assertNotIn('monkey',horse.system)
         self.assertEqual(horse.context_json,'{}')
         unknown = preview_prompt(replace(obs,creature=CreatureContext()),None)
-        self.assertEqual(unknown.system,SYSTEM)
+        self.assertTrue(unknown.system.startswith(SYSTEM))
+        self.assertIn('"species":"unknown"', unknown.system)
+        self.assertIn(UNKNOWN_SPECIES_NOTE, unknown.system)
+        self.assertNotIn('"species":"horse"', unknown.system)
 
     def test_only_active_facts_reach_model_while_candidates_remain_exact(self):
         obs = playable(creature=CreatureContext('monkey','engine'), leash=LeashContext(False, attachment='none'),

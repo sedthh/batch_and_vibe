@@ -7,6 +7,7 @@ from .actions import intent_options
 from .drives import compact_drives
 from .profile_names import with_profile_names
 from .prompt_settings import DEFAULT_PROMPTS
+from .species_prompts import SPECIES_NOTES, UNKNOWN_SPECIES_NOTE
 from .bridge_prompt import BRIDGE_GUIDANCE
 import json
 from typing import TYPE_CHECKING
@@ -104,13 +105,13 @@ def _material(request, summary, *, settings=None) -> CreaturePrompt:
     creature = request.creature
     system = with_profile_names(build_system(settings), creature.names)
     system = with_island_roster(system, request.island)
-    if creature.species:
-        form = {'species': creature.species}
-        if creature.species_source != 'engine':
-            form['source'] = creature.species_source
-        if creature.species_traits:
-            form['traits'] = [_present(asdict(t)) for t in creature.species_traits]
-        system += '\nCreature form (data): ' + json.dumps(form, ensure_ascii=False, separators=(',', ':'))
+    form = {'species': creature.species or 'unknown',
+        'species_note': SPECIES_NOTES.get(creature.species, UNKNOWN_SPECIES_NOTE)}
+    if creature.species_source != 'engine':
+        form['source'] = creature.species_source
+    if creature.species_traits:
+        form['traits'] = [_present(asdict(t)) for t in creature.species_traits]
+    system += '\nCreature form (data): ' + json.dumps(form, ensure_ascii=False, separators=(',', ':'))
     for key in ('individual_traits',):
         traits = getattr(creature, key)
         if traits:

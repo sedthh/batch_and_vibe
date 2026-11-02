@@ -168,7 +168,7 @@ class SettingsWindow:
         ttk.Button(vr_panel,text='Voice settings',command=lambda:tabs.select(1)).pack(anchor='w')
         tabs.add(limits, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
-        prompt = ttk.Frame(tabs, padding=12); tabs.add(prompt, text='General prompt')
+        prompt = ttk.Frame(tabs, padding=12)
         ttk.Label(prompt, text='Customize game background, personality and speaking style.\n'
             'Tool, engine and memory rules are added separately and cannot be edited here.',
             wraplength=570).pack(anchor='w', pady=(0, 8))
@@ -239,6 +239,7 @@ class SettingsWindow:
             field(cadence, name, label, source=config['cadence'])
         field(cadence, 'event_cooldown_seconds', 'Important-event cooldown (seconds)')
         music_panel = ttk.Frame(tabs, padding=12); tabs.add(music_panel, text='Music')
+        tabs.add(prompt, text='General prompt')
         self.values['winamp_music'] = tk.BooleanVar(value=config['winamp_music'])
         ttk.Checkbutton(music_panel, text='Connect to Winamp',
                         variable=self.values['winamp_music']).pack(anchor='w')

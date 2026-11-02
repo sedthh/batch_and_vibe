@@ -114,6 +114,10 @@ class SpeciesTests(TestCase):
         horse = memory.sample()
         self.assertEqual(horse.context.species, 'horse')
         self.assertEqual(horse.creature_id, initial.creature_id)
+        for label, species in ((b'Rhino creature', 'rhino'), (b'Gorilla creature', 'gorilla')):
+            memory.bytes(memory.info+live.INFO_NAME, label.ljust(48, b'\0'))
+            self.assertEqual(memory.sample().context.species, species)
+            self.assertEqual(live.read_object_species(memory.reader, memory.creature), species)
         memory.bytes(memory.info+live.INFO_NAME, b'Unknown creature'.ljust(48, b'\0'))
         self.assertIsNone(memory.sample().context.species)
         memory.put(memory.player+PLAYER_CREATURE, 0)
