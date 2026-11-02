@@ -1,7 +1,7 @@
 # Black & White LLM Creature Mod
 
-Bond with your creature in Lionhead's **Black & White**: talk, teach it, and
-**sing along to your music**, on desktop or with [experimental VR support](docs/vr.md).
+Bond with your creature in Lionhead's **Black & White**: talk and teach it,
+on desktop or with [experimental VR support](docs/vr.md).
 LLM conversations and decisions build on the original creature AI, which keeps
 learning as you play. Supports text and voice chat, plus Winamp with the original
 [MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/).
@@ -87,8 +87,9 @@ See [voice setup](docs/usage.md#voice-input) for the extra local-model installat
 Use Winamp with the original [Black & White MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/),
 then enable **Music → Connect to Winamp** in settings. The add-on handles playback
 and native dancing; this mod lets the creature recognize the current song, your
-listening habits and short lyric excerpts. Sing through your usual voice input
-without a special command. Optional **Look up missing lyrics online (LRCLIB)**
+listening habits and short lyric excerpts. Lyric context can help it respond when
+you sing through voice input, though it may comment on or repeat your words
+rather than continue the song. Optional **Look up missing lyrics online (LRCLIB)**
 needs no API key; plain lyrics can supply a repeated refrain. Creature replies
 are text, including lyric responses. See [music setup and compatibility](docs/usage.md#winamp-music).
 
