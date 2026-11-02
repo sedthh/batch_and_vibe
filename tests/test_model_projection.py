@@ -19,6 +19,45 @@ from test_world_actions import WorldHarness
 
 
 class ModelProjectionTests(unittest.TestCase):
+    def test_music_compaction_preserves_values_and_is_idempotent_for_saved_turns(self):
+        playback={'source':'winamp','state':'playing','title':'Paper Moon',
+            'title_source':'window_caption','track_session':9,'position_ms':45125,
+            'length_seconds':180,'volume_percent':50,'sample_age_seconds':.2}
+        raw={'snapshot':{},'music':playback,'music_at_submission':deepcopy(playback),
+             'native_music':{'dance_animation_active':True,
+                'mood':{'source':'native_music_mood','music_mood_enabled':True,
+                        'entry_track_id':'secret-id','mood_engine_units':.25,'recent_feedback_engine_units':-.1},
+                'line_input':{'source':'game_line_input','active':True,'recent_beat_detected':True,
+                              'signal_above_threshold':True,'detected_tempo_bpm':143}},
+             'music_during_recording':{'source':'winamp_samples','recording_seconds':3,
+                'recording_timing':'estimated_from_captured_audio_duration','at_start':playback,
+                'at_end':dict(playback,position_ms=48125),'changes':[],'has_observation_gap':False}}
+        result=model_turn(raw)
+        self.assertEqual(result['music'],{'state':'playing','title':'Paper Moon','position_seconds':45.125,
+                                         'duration_seconds':180})
+        self.assertNotIn('music_at_submission',result)
+        self.assertEqual(result['snapshot']['activity'],{'dancing':True})
+        self.assertEqual(result['native_music'],{'mood_raw':.25,'feedback_raw':-.1,
+                                               'line_input':{'beat':True,'tempo_bpm':143}})
+        self.assertEqual(result['music_during_recording'],{'duration_seconds':3,
+            'start':{'state':'playing','title':'Paper Moon','position_seconds':45.125},'end_position_seconds':48.125})
+        self.assertEqual(model_turn(result),result)
+        self.assertIn('source',raw['music'])
+
+    def test_music_keeps_recording_changes_and_missing_data_without_empty_native_flags(self):
+        start={'source':'winamp','title':'Paper Moon','state':'playing','position_seconds':40}
+        end={'source':'winamp','state':'unavailable'}
+        result=model_turn({'snapshot':{},'music':end,'music_at_submission':start,
+            'native_music':{'mood':{'mp3_feature_enabled':False,'music_mood_enabled':False},
+                            'line_input':{'active':False}},
+            'music_during_recording':{'recording_seconds':3,'at_start':start,'at_end':end,
+                'changes':[{'seconds_into_recording':1,**end}],'has_observation_gap':True}})
+        self.assertNotIn('native_music',result)
+        self.assertEqual(result['music_at_submission']['title'],'Paper Moon')
+        self.assertTrue(result['music_during_recording']['incomplete'])
+        self.assertEqual(result['music_during_recording']['changes'],[{'at_seconds':1,'state':'unavailable'}])
+        self.assertEqual(model_turn(result),result)
+
     def test_short_labels_preserve_meaning_and_do_not_rewrite_text_or_raw_readings(self):
         literal = 'time_delta_since_last_message_seconds, learning_threshold_met 🐾'
         raw = {'time_delta_since_last_message_seconds': 45, 'god_question': literal,

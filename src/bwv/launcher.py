@@ -274,11 +274,13 @@ def main(argv=None):
             def apply_settings(updated):
                 nonlocal settings, automatic, vr
                 prepare_provider(updated, config_path, dummy=args.dummy)
-                if updated.vr_mode and args.no_overlay:
+                # A saved VR preference can outlive a switch to a desktop-only
+                # installation. Match startup's fallback instead of blocking
+                # unrelated settings while the desktop services are running.
+                next_vr=updated.vr_mode and not vr_installation_error(root)
+                if next_vr and args.no_overlay:
                     raise ValueError('VR mode requires the overlay process. Restart without --no-overlay.')
-                if updated.vr_mode and vr_installation_error(root):
-                    raise ValueError(vr_installation_error(root))
-                vr=updated.vr_mode
+                vr=next_vr
                 if game_launcher is not None:
                     game_launcher.vr_mode=vr
                 if debug_session.runtime is not None:

@@ -285,6 +285,9 @@ class OverlayWindow:
         self.input_history.submitted(text)
         self.pending=True;self.notice=''
         self.submission=ChatSubmission(text,identity,time.monotonic()+10)
+        draft=getattr(self,'voice_draft',None)
+        if draft and draft[0]==text and draft[1]==identity:
+            self.submission.voice_recording=draft[2]
         self.advance_submission()
         self.render()
         return 'break'
@@ -303,7 +306,9 @@ class OverlayWindow:
         if readiness!='ready':return
         submission.sending=True
         def send():
-            try:self.emit('reply',(submission,self.client.ask(submission.text,submission.identity)))
+            try:
+                extra={'voice_recording':submission.voice_recording} if submission.voice_recording else {}
+                self.emit('reply',(submission,self.client.ask(submission.text,submission.identity,**extra)))
             except ChatNotSubmitted as error:
                 self.emit('not_submitted',(submission,error.retryable))
             except (OSError,ValueError,EOFError):
@@ -315,6 +320,7 @@ class OverlayWindow:
 
     def browse_input(self, direction):
         if self.pending or (getattr(self,'voice',None) and self.voice.active):return 'break'
+        self.voice_draft=None
         text=self.input_history.move(direction,self.entry.get())
         self.entry.delete(0,'end');self.entry.insert(0,text);self.entry.icursor('end')
         return 'break'
@@ -494,6 +500,7 @@ class OverlayWindow:
                 preserve_draft=kind!='reply'
                 if submission.identity==self.model.identity or self.model.identity is None:
                     if kind=='reply':
+                        self.voice_draft=None
                         self.entry.configure(state='normal');self.entry.delete(0,'end')
                         self.notice=''
                         message=result.get('last_message')
@@ -515,6 +522,7 @@ class OverlayWindow:
             if self.target_identity is not None:
                 self.expanded=False;self.restore_input_focus=False
             if getattr(self,'submission',None) is None and not preserve_draft:
+                self.voice_draft=None
                 self.entry.configure(state='normal');self.entry.delete(0,'end')
             self.target_identity=self.model.identity
         self.advance_submission()

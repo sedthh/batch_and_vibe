@@ -113,6 +113,11 @@ def group_self(value):
 def model_turn(value):
     """Transport timestamps and planner flags are diagnostic data, not context."""
     result = deepcopy(value)
+    from .music_context import compact_music_turn
+    compact_music_turn(result)
+    if isinstance(result, dict):
+        # Retired host-side lyric mode must not reappear through saved history.
+        result.pop('lyric_sharing', None)
     # Reprojecting an older wire request must rename removal paths as well as
     # dictionary keys, or historical fields can survive under their new names.
     if isinstance(result, dict) and isinstance(result.get('snapshot_removed'), list):

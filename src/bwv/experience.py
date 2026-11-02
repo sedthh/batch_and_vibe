@@ -102,6 +102,7 @@ class Experience:
     hover_thought_text: str | None = None
     native_training_feedback: tuple[NativeMessage, ...] = ()
     native_text_validation: str = 'unavailable'
+    music: dict | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +114,7 @@ class ExperienceSample:
     body: BodyState
     instinct: NativeInstinct = NativeInstinct()
     effects: tuple[ReceivedEffect,...] = ()
+    music: dict | None = None
 
 
 class ExperienceTracker:
@@ -161,4 +163,4 @@ class ExperienceTracker:
             self.seen = dict(sorted(self.seen.items(),key=lambda pair:pair[1])[-256:])
         self.previous = sample
         return Experience(sample.body,sample.instinct,tuple(event for _,event in self.events),
-                          tuple(self.effects),'offline_layout_live_qa_pending')
+                          tuple(self.effects),'offline_layout_live_qa_pending',music=sample.music)

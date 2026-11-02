@@ -90,6 +90,7 @@ class VoiceOverlay:
             elif w.entry.get().strip():
                 w.notice = '[Send or clear your typed message before recording.]'
             else:
+                w.voice_draft = None
                 self.status = 'Opening microphone'
                 self.active = True
                 w.notice = ''
@@ -136,6 +137,7 @@ class VoiceOverlay:
             w.entry.configure(state='normal')
             w.entry.delete(0, 'end'); w.entry.insert(0, value)
             w.entry.icursor(0); w.entry.xview_moveto(0)
+            w.voice_draft = (value.strip(), job.identity, job.timing())
             if self.config.auto_send:
                 w.submit()
                 w.open_input(focus=False)

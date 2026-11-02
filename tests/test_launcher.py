@@ -15,6 +15,40 @@ from bwv.supervisor import Notices, ObserverSupervisor, chat_error
 
 
 class LauncherTests(unittest.TestCase):
+    def test_desktop_settings_apply_does_not_require_stale_saved_vr_installation(self):
+        from contextlib import ExitStack, nullcontext
+        from dataclasses import replace
+        from bwv.launcher import main
+        with TemporaryDirectory() as directory, ExitStack() as stack:
+            root=Path(directory);config_path=root/'settings.json';config_path.write_text('{}')
+            saved=LLMConfig(model='fixture-model',vr_mode=True)
+            stack.enter_context(patch('bwv.launcher.load_settings',return_value=(saved,config_path)))
+            stack.enter_context(patch('bwv.launcher.prepare_provider'))
+            stack.enter_context(patch('bwv.launcher.ensure_admin',return_value=True))
+            stack.enter_context(patch('bwv.launcher.instance_lock',return_value=nullcontext()))
+            stack.enter_context(patch('bwv.launcher.choose_game',return_value=root))
+            stack.enter_context(patch('bwv.launcher.ensure_installed'))
+            vr_check=stack.enter_context(patch('bwv.vr_install.installation_error',return_value='BW1-VR is unavailable.'))
+            game=stack.enter_context(patch('bwv.game_display.GameLauncher')).return_value
+            play=stack.enter_context(patch('bwv.supervisor.play',new_callable=AsyncMock))
+            async def managed(factory,path,**kwargs):
+                await factory(Mock())
+                # Saving unrelated settings must work before detection, after
+                # detection, and repeatedly after VR becomes unavailable again.
+                for limit,error in ((42,'BW1-VR is unavailable.'),(43,None),
+                                    (44,'BW1-VR is unavailable.'),(45,'BW1-VR is unavailable.')):
+                    vr_check.return_value=error
+                    kwargs['apply_settings'](replace(saved,max_messages=limit))
+                    await factory(Mock())
+            stack.enter_context(patch('bwv.launcher_lifecycle.run_managed',side_effect=managed))
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(main(['--config',str(config_path),'--no-vr']),0)
+            self.assertEqual(play.await_count,5)
+            self.assertEqual([call.kwargs['vr'] for call in play.await_args_list],
+                             [False,False,True,False,False])
+            self.assertEqual(play.await_args.args[1].max_messages,45)
+            self.assertFalse(game.vr_mode)
+
     def test_missing_bridge_autoinstalls_then_verifies_before_success_popup(self):
         from bwv.launcher import ensure_installed
         from contextlib import ExitStack

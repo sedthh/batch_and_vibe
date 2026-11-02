@@ -163,6 +163,138 @@ toward both limits because the provider may already have processed the audio.
 Reaching a cap leaves typed chat available. These limits do not cap local Whisper.
 Restarting the mod or using **Save & apply** starts a fresh voice budget.
 
+## Winamp music
+
+Use your existing Winamp installation and the original
+[Black & White MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/).
+The add-on's instructions say to start Winamp before loading the game. Keep that
+setup responsible for playback and the creature's native music reactions; this
+mod neither installs nor disables the add-on and does not add an MP3-folder player.
+
+1. Open **Model, API key & settings → Music**, enable **Connect to Winamp**, and
+   **Save & apply**. The setting is off by default (`winamp_music: false`).
+2. Play a track in Winamp. Use a single Winamp instance.
+3. Speak, sing or type through ordinary chat. No start/stop phrases or lyric mode
+   are required. The integration adds playback data without classifying your words,
+   withholding action tools, changing command handling or pausing automatic thinking.
+
+The connection reads playback state, displayed track label, playback position
+and track duration. Available readings accompany normal scheduled
+model turns and chat; track changes do not trigger extra calls. Each chat message
+also keeps its sampled playback context at submission.
+The agent sees a compact music block: state, title, and position/duration in seconds.
+Internal source labels, track-session IDs and sample-age
+metadata stay in diagnostics. An identical submission-time block is omitted.
+
+`listening_history` adds one compact label based on song starts observed by the mod:
+`new` (zero or one observed start), `rare` (two or three), `occasional` (four to nine),
+`regular` (ten to twenty-four), or `favorite` (twenty-five or more).
+Counts never enter model context. Joining a song
+midway still shows `new` if it has no prior recorded starts, without incrementing
+the counter. A start must be sampled within the first five seconds. Pausing,
+ordinary seeking, repeated polls and reconnecting to the same active song do not
+increase it. A sampled end-to-start wrap can count a repeat; a seek at that exact
+boundary can be indistinguishable. Missed starts while disconnected are not guessed.
+
+`on_repeat: true` appears when the current song accounts for at least three of the
+last ten observed song starts, including the current start when observed. The
+plays need not be consecutive: repeating a small playlist also qualifies. This
+describes recent rotation, separately from lifetime `listening_history`, and is
+omitted when the condition no longer holds. Polls and pauses do not fill this
+window. The recent window is saved alongside the counts and survives restarts;
+older history files retain their counts and begin with an empty recent window.
+
+History survives restarts in `music-history.json` beside the runtime's conversation
+store. It holds bounded counts under hashed song identifiers, not song names,
+file paths or lyrics. The filename identifies the song when available; otherwise
+the displayed title/artist is used, so indistinguishable labels may share history.
+The labels describe observed repetition rather than total listening outside the
+mod. Dummy and live runtime stores remain separate.
+
+For a local MP3, the connection also reads embedded tags using TinyTag and caches
+up to eight files, refreshing a file when its size or modification time changes.
+Available title, artist, genre and tagged BPM are included; album art, comments,
+file paths and other tags are excluded. Missing tags leave the window-title
+fallback working. These tags describe the file; BPM is not a live beat measurement.
+The reader uses only bounded, read-only access to Winamp's filename string and MP3
+tag regions. Unsupported, denied or changing filename readings omit file metadata.
+
+The optional **Look up missing lyrics online (LRCLIB)** checkbox in **Music**
+uses [LRCLIB](https://lrclib.net) without an API key. It is off by default and
+requires the Winamp connection. Embedded lyrics take precedence; otherwise it
+sends only the tagged artist, cleaned track title and duration, never the audio,
+file path or player's words. Lookup runs in the background. Exact artist/title
+matches can supply timed lyrics when durations agree within two seconds; a
+different duration permits plain text only. Missing artist tags skip lookup.
+Unavailable service results leave ordinary music context working.
+
+Results are cached in `music-lyrics` beside the runtime's conversation store:
+successful lyrics for 30 days, missing results for one day and failures for five
+minutes, with at most 128 files. Full lyrics stay in this local cache and are
+not included in chat context. Service retry delays are respected.
+
+Timestamped lyrics (embedded SYLT, LRC-formatted tags or LRCLIB results) can supply
+at most two nearby cues and 320 UTF-8 bytes of lyric text across the entire turn.
+All exposed timestamps use seconds. Recording-time lyrics take priority over
+submission-time or current playback. When lyrics lack timestamps, a local
+literal-word regex search can retrieve one passage matching at least three
+consecutive words from the player's submitted message, ignoring case/punctuation.
+That excerpt uses `match: words`, without a fabricated lyric timestamp. It shares
+the same 320-byte budget; full lyric sheets are never sent. Matching only retrieves
+context: it does not classify singing, change the message or gate action tools.
+When no specific match is available, repeated one- or two-line phrases can supply
+one short `match: refrain` hint for the creature to sing. This is a recurring
+phrase, not a claim about the current verse or its timing. Unique lyrics supply
+no generic refrain. Recorded voice searches its sampled song(s), not a replacement
+track at submission. No audio is transcribed from the song. Old observations lose their lyric excerpts
+when assembling later model requests, while the player's words, replies, song
+identity and timing remain. The current excerpt may recur in tool rounds or
+consecutive turns, but full lyric sheets never enter model context or saved chat turns.
+
+Voice messages additionally carry the approximate captured audio window. Playback
+history supplies the track and position sampled near the beginning and end, plus
+observed track/state changes during the recording. Idle microphone waiting and
+transcription delays are excluded. This works with push-to-talk, voice activation,
+automatic sending and unchanged transcripts sent after review, including VR.
+Replacing/editing the transcript drops the recording association; ordinary chat
+still works. Playback history stays in memory for up to ten minutes and clears on
+a game-connection gap. Missing samples are reported as unavailable, never replaced
+with the track playing at submission. Timing includes sample age and is approximate,
+not beat-accurate synchronization or proof that your words match a song's lyrics.
+
+On the supported game build, optional read-only sensors also expose native music
+feature flags, the current native music-mood entry and recent feedback in raw
+engine units. Verified controller state can identify an active dance animation.
+The separate game line-input analyser supplies activity, beat-detection status and
+detected tempo when its native strength/freshness checks pass. Its 120 BPM fallback
+is never presented as a measured tempo. Line-input observations are labelled with
+their own source; they are not automatically attributed to the Winamp track. The
+reader does not enable line-input capture or change the add-on's configuration.
+The agent's `native_music` block contains only available `mood_raw`, `feedback_raw`
+and `line_input` beat/tempo readings; an empty block is omitted. Verified dancing
+belongs to the normal `activity.dancing` state, independently of music settings.
+Voice playback context is also compact, with seconds throughout and observation
+gaps marked only when present.
+These layouts and code fingerprints were checked against the supported executable;
+live music/beat behaviour still needs checking with the game and add-on running.
+
+Track observations use Winamp's classic window/IPC interface. Compatibility with
+a particular version or skin needs checking in that setup. An unavailable, hung,
+inaccessible or ambiguous player leaves ordinary chat working. Missing, overly
+long and file/stream-location titles are omitted. Playback data expires after a
+sampling gap. Music context stays in the background; there is no track or
+connection indicator in the chat overlay. The optional debugger includes it.
+
+No Winamp audio-analysis plug-in or generated singing voice is currently connected.
+A fallback window title is not a verified artist/title split, and
+Winamp playback does not establish whether the game add-on is installed or reacting.
+The existing conversation, memory and action tools remain available as usual.
+
+Enabling this connection includes playback, recording-time context and native music readings in your
+configured chat model's context and may retain them in ordinary chat history or
+memories. It reads local MP3 tags, but does not upload song files or playback audio.
+Microphone recordings still follow your separate voice-provider settings.
+
 ## Settings and debugging
 
 The mod window's **Model, API key & settings** button opens configuration. Settings

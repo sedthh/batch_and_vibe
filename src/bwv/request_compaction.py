@@ -1,4 +1,4 @@
-"""Lossless wire-only history compression; current observations stay complete."""
+"""Wire-only history compression; ephemeral music excerpts stay current-only."""
 from copy import deepcopy
 import json
 import re
@@ -78,7 +78,8 @@ def compact_messages(messages):
 
     The first retained historical observation is always complete. This makes
     rolling history, reconnects and restarts independent of discarded messages.
-    Use a patch only when it is smaller; never drop fields, rounds or exchanges.
+    Use a patch only when it is smaller. Historical music lyric excerpts expire;
+    retain the player's words, replies, track identity and timing.
     """
     result = []
     previous = None
@@ -94,6 +95,9 @@ def compact_messages(messages):
             result.append(message)
             continue
         if message['role'] == 'user' and isinstance(value, dict):
+            if index != last_user:
+                from .music_context import omit_historical_music_lyrics
+                omit_historical_music_lyrics(value)
             if isinstance(value.get('snapshot_changes'), dict) and previous is not None:
                 value['snapshot'] = _apply_changes(previous, value.pop('snapshot_changes'),
                                                    value.pop('snapshot_removed', []))

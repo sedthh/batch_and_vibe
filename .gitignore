@@ -31,6 +31,8 @@ __pycache__/
 creature-memory.json
 dummy-memory.json
 token-usage.json
+music-history.json
+music-lyrics/
 usage.*.tmp
 .creature-memory-*.tmp
 # Personal settings, credentials, captures and local research/recovery artifacts.

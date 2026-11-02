@@ -18,6 +18,88 @@ from bwv.profile_names import ProfileNames
 
 
 class LiveDummyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_untimed_lyric_lookup_enriches_message_without_rewriting_player_words(self):
+        from bwv.music import Playback
+        from bwv.music_tags import TrackTags
+        from unittest.mock import Mock
+        self.runtime.automatic=False;self.runtime.music.enabled=True
+        reader=Mock();self.runtime.music.reader=reader
+        reader.read.return_value=Playback('playing','Paper Moon',(10,77,0),45,180,
+            lyric_source=TrackTags(untimed=('Burn down the village and build a paper moon.',)))
+        self.runtime.ingest(self.frame())
+        await self.runtime.question({'question':'Burn down the village'})
+        current=self.runtime.provider.requests[-1].current
+        self.assertEqual(current['god_question'],'Burn down the village')
+        self.assertEqual(current['music_at_submission']['lyrics'][0]['match'],'words')
+        self.assertNotIn('lyric_sharing',current)
+
+    async def test_voice_timing_uses_recording_history_not_submission_track(self):
+        from bwv.music import Playback
+        from unittest.mock import Mock
+        self.runtime.automatic=False;self.runtime.music.enabled=True
+        reader=Mock();self.runtime.music.reader=reader
+        reader.read.return_value=Playback('playing','Paper Moon',(10,77,0),45,180)
+        self.runtime.ingest(self.frame());await self.runtime.music.poll()
+        self.now=101.1
+        reader.read.return_value=Playback('playing','Clockwork Castle',(10,77,1),1,200)
+        await self.runtime.music.poll()
+        self.now=110;self.runtime.ingest(self.frame())
+        await self.runtime.question({'question':'My boots are clouds',
+            'voice_recording':{'started_at':100.1,'ended_at':101.5}})
+        current=self.runtime.provider.requests[-1].current
+        self.assertEqual(current['music']['title'],'Clockwork Castle')
+        captured=current['music_during_recording']
+        self.assertEqual(captured['start']['title'],'Paper Moon')
+        self.assertEqual(captured['start']['position_seconds'],45)
+        self.assertEqual(captured['changes'][-1]['title'],'Clockwork Castle')
+        self.assertNotIn('incomplete',captured)
+        for timing in ({'started_at':105,'ended_at':104},{'started_at':1,'ended_at':float('nan')},
+                       {'started_at':True,'ended_at':109},{'started_at':108,'ended_at':200}):
+            with self.assertRaisesRegex(ValueError,'recording timing'):
+                await self.runtime.question({'question':'Hello','voice_recording':timing})
+
+    async def test_native_music_is_optional_context_without_prompt_or_control_changes(self):
+        self.runtime.music.enabled=True
+        self.runtime.ingest(self.frame())
+        self.runtime.source['observation']['experience']={'music':{
+            'mood':{'source':'native_music_mood','mood_engine_units':.25}}}
+        self.runtime.source['diagnostics']['action_probe']={'activity':{'verified':True,'controller_mode':6}}
+        _,current=self.runtime._prompt(self.runtime.gate.observation,self.now)
+        self.assertTrue(current['snapshot']['activity']['dancing'])
+        self.assertEqual(current['native_music'],{'mood_raw':.25})
+        self.runtime.music.enabled=False
+        _,current=self.runtime._prompt(self.runtime.gate.observation,self.now)
+        self.assertNotIn('native_music',current)
+        self.assertTrue(current['snapshot']['activity']['dancing'])
+
+    async def test_winamp_context_accompanies_ordinary_chat_without_music_instructions(self):
+        from bwv.music import Playback
+        from unittest.mock import Mock
+        self.runtime.automatic=False
+        self.runtime.ingest(self.frame())
+        obs=self.runtime.gate.observation
+        system_without_music,_=self.runtime._prompt(obs,self.now)
+        self.runtime.music.enabled=True
+        reader=Mock()
+        reader.read.return_value=Playback('playing', 'Paper Moon', (10,77,0,'Paper Moon'))
+        self.runtime.music.reader=reader
+        for text in ("I'm singing along", 'Listen to these lyrics', 'Come to me'):
+            await self.runtime.question({'question':text})
+            request=self.runtime.provider.requests[-1]
+            self.assertEqual(request.current['music']['title'],'Paper Moon')
+            self.assertNotIn('music_at_submission',request.current)
+            self.assertNotIn('lyric_sharing',request.current)
+        system_with_music,_=self.runtime._prompt(obs,self.now)
+        self.assertEqual(system_with_music,system_without_music)
+        self.assertEqual(self.runtime.payload()['current']['music']['state'],'playing')
+        self.assertNotIn('music',self.runtime.overlay_payload()['current'])
+        self.now+=1.1
+        self.runtime.ingest(self.frame())
+        reader.read.return_value=Playback('playing', 'Clockwork Castle', (10,77,1,'Clockwork Castle'))
+        await self.runtime.question({'question':'Come to me'})
+        self.assertEqual(self.runtime.provider.requests[-1].current['music']['title'],'Clockwork Castle')
+        self.assertNotIn('lyric_sharing',self.runtime.overlay_payload()['current'])
+
     async def test_shared_observer_frame_stays_read_only_and_still_expires(self):
         from copy import deepcopy
         from unittest.mock import patch

@@ -328,6 +328,9 @@ def summarize_context(context, raw=None, *, probe=None):
         activity['sleep_phase']=phase
         if phase=='asleep':activity['sleeping']=True
     elif context.get('sleeping') is True:activity['sleeping']=True
+    animation = (probe or {}).get('activity') or {}
+    if animation.get('verified') is True and animation.get('controller_mode') == 6:
+        activity['dancing'] = True
     if context.get('leash'):
         activity['leash']=deepcopy(context['leash'])
         if isinstance(activity['leash'],dict) and isinstance(activity['leash'].get('target'),dict):

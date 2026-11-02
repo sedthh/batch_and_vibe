@@ -28,6 +28,8 @@
   "wake_on_question": false,
   "reenable_cut_content": true,
   "vr_mode": false,
+  "winamp_music": false,
+  "music_lyrics_online": false,
   "voice": {
     "enabled": false,
     "provider": "local",

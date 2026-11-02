@@ -489,6 +489,21 @@ class CaptureTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_audio_window_excludes_activation_idle_and_transcription_delay(self):
+        now=[100.0];events=[]
+        def record(*args,**kwargs):
+            now[0]=130.0
+            return audio_clip(2)
+        def transcribe(*args,**kwargs):
+            now[0]=150.0
+            return 'My boots are clouds'
+        worker=VoiceInput(VoiceSettings(),'unused',lambda *event:events.append(event),
+            recorder=record,transcriber=Mock(transcribe=transcribe))
+        with patch('bwv.voice.time.monotonic',side_effect=lambda:now[0]):
+            job=worker.start(('session','creature'));worker.thread.join(2)
+        self.assertEqual(job.timing(),{'started_at':128.0,'ended_at':130.0})
+        self.assertIn('voice_text',[kind for kind,_ in events])
+
     def test_empty_transcript_is_distinct_from_provider_failure(self):
         from bwv.voice import NoSpeechError
         events=[]

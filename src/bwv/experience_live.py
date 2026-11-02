@@ -91,6 +91,8 @@ def read_experience(reader,observer=None):
         if fire.session != session or fire.creature_id != identity:
             raise ValueError('Creature changed during fire observation')
         body = BodyState(**values,on_fire=fire.on_fire)
+        from .native_music_live import read_native_music
+        music = read_native_music(reader)
         if (reader.word(creature+CREATURE_OWNER)!=player or reader.word(creature+CREATURE_MENTAL)!=mental
                 or reader.word(creature+CREATURE_PHYSICAL)!=physical
                 or reader.word(mental+MENTAL_PLAN+PLAN_ACTION)!=plan
@@ -101,5 +103,5 @@ def read_experience(reader,observer=None):
         now=time.monotonic()
         if now-start>.75:
             raise ValueError('Experience observation exceeded freshness limit')
-        return ExperienceSample(session,identity,now,tick,body,instinct)
+        return ExperienceSample(session,identity,now,tick,body,instinct,music=music)
     raise ValueError('Experience changed during observation')

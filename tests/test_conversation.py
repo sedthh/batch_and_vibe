@@ -24,6 +24,26 @@ class Provider:
 
 
 class ConversationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_queued_chat_retains_playback_context_without_classifying_words(self):
+        release=asyncio.Event();provider=Provider(release)
+        music={'source':'winamp','state':'playing','title':'Paper Moon'}
+        broker=self.broker(provider,music_context=lambda:music)
+        try:
+            first=asyncio.create_task(broker.ask("I'm singing along"))
+            await provider.entered.wait()
+            second=asyncio.create_task(broker.ask('Come to me'))
+            await asyncio.sleep(0)
+            music['title']='Clockwork Castle'
+            release.set()
+            await asyncio.gather(first,second)
+            for request in provider.requests:
+                self.assertEqual(request.current['music_at_submission']['title'],'Paper Moon')
+                self.assertNotIn('lyric_sharing',request.current)
+            self.assertEqual(provider.requests[-1].current['god_question'],'Come to me')
+        finally:
+            release.set()
+            await broker.close()
+
     def test_persistent_message_survives_expiry_and_silent_automatic_reply(self):
         speech=CreatureSpeech(2)
         speech.publish('I will watch the field.',0,{'candidate':None},source='action_comment')
