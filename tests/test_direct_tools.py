@@ -260,7 +260,8 @@ class DirectToolsTests(unittest.TestCase):
         s=DirectCreatureToolSession(frame,action_candidates=('wave',))
         request=action_request(('wave',),conversation_only=True)
         s.bind_request(request)
-        self.assertNotIn('capabilities',s.project_request(request).current)
+        self.assertEqual(s.project_request(request).current['capabilities'],
+                         {'actions':[], 'held_actions':[], 'movement_destinations':[]})
 
     def test_tool_prompt_removes_legacy_candidate_rules_and_lists_real_casts(self):
         from bwv.prompt import ACTION_CONTRACT

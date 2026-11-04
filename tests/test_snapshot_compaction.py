@@ -137,7 +137,7 @@ class SnapshotCompactionTests(unittest.TestCase):
                 self.assertEqual(json.loads(projected.messages[-1]['content']), projected.current)
                 self.assertEqual(projected.current['elapsed_seconds'], 30)
 
-    def test_action_enums_remain_in_schemas_and_reference_without_tick_duplicates(self):
+    def test_current_action_availability_accompanies_fixed_schemas(self):
         session, _, request = bound(WorldHarness())
         request = replace(request, messages=(
             {'role': 'system', 'content': 'Synthetic game.'},
@@ -146,7 +146,8 @@ class SnapshotCompactionTests(unittest.TestCase):
         projected = session.project_request(request)
         self.assertEqual(session.definitions(), definitions)
         capabilities = projected.current['capabilities']
-        self.assertNotIn('actions', capabilities)
+        self.assertEqual(capabilities['actions'], list(session.menu))
+        self.assertEqual(capabilities['held_actions'], list(session.held_menu))
         self.assertNotIn('held_object_actions', capabilities)
         self.assertIn('fishing_destinations', capabilities)
         for definition in definitions:

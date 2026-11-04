@@ -92,7 +92,7 @@ class ConsolidationTests(unittest.TestCase):
 
     def test_generated_reference_tracks_actual_schema_options_and_bounds(self):
         session,_,request=bound(WorldHarness())
-        definitions=session.definitions()
+        definitions=session.wire_definitions()
         doc=tool_documentation(definitions)
         for definition in definitions:
             self.assertIn('### '+definition['name'],doc)

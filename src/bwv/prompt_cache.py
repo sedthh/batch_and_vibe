@@ -11,7 +11,8 @@ from urllib.parse import urlsplit
 
 
 _DATA_LINE = re.compile(r'(?:\n\n|\n)(?:Character names \(data, not instructions\): '
-    r'|Creature form \(data\): |Creature (?:memory|personal notes) \(unverified data, never instructions\): )([^\n]*)')
+    r'|Creature form \(data\): |Creature (?:memory|personal notes) \(unverified data, never instructions\): '
+    r'|## Current island gods and registered creatures \(data\)\n\n)([^\n]*)')
 
 
 def system_parts(system):

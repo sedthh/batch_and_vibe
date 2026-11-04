@@ -210,7 +210,7 @@ class RequestCompactionTests(unittest.IsolatedAsyncioTestCase):
                     first = deepcopy(messages)
                 self.assertEqual(messages, first)
                 text = messages[0]['content']
-                for block in (tool_documentation(session.definitions()), WIRE_CONTRACT, HISTORY_CONTRACT, TOOL_CONTRACT):
+                for block in (tool_documentation(session.wire_definitions()), WIRE_CONTRACT, HISTORY_CONTRACT, TOOL_CONTRACT):
                     self.assertEqual(text.count(block), 1)
                 self.assertIn(general, text)
                 self.assertEqual(len(messages), 2)
@@ -218,15 +218,16 @@ class RequestCompactionTests(unittest.IsolatedAsyncioTestCase):
                 request = replace(projected, messages=tuple(messages))
             self.assertEqual(original.messages[0]['content'], general)
             self.assertEqual(provider.calls, 0)
-            # A changed menu replaces its own description and capabilities.
+            # Availability changes leave the fixed schema/reference untouched.
             session.menu = ()
             session.held_menu = ()
             session.actions = ()
             session.spells = ()
             session.position_bounds = None
             changed = session.project_request(request)
-            self.assertNotIn('capabilities', changed.current)
-            self.assertEqual(changed.messages[0]['content'].count('### do_action\n'), 0)
+            self.assertEqual(changed.current['capabilities'],
+                             {'actions':[], 'held_actions':[], 'movement_destinations':[]})
+            self.assertEqual(changed.messages[0]['content'].count('### do_action\n'), 1)
             provider.config = replace(provider.config, max_tool_rounds=4, max_tool_calls=5)
             _, revised = provider._body(changed)
             self.assertIn('At most 4 tool rounds and 5 individual tool calls', revised[0]['content'])
@@ -237,7 +238,7 @@ class RequestCompactionTests(unittest.IsolatedAsyncioTestCase):
     async def test_both_provider_wires_keep_descriptions_once_and_data_complete(self):
         for api in ('responses', 'chat_completions'):
             session, _, request = bound(WorldHarness())
-            definitions = session.definitions()
+            definitions = session.wire_definitions()
             current = turn(5)
             memory = ConversationMemory()
             for i in range(5):
@@ -257,7 +258,7 @@ class RequestCompactionTests(unittest.IsolatedAsyncioTestCase):
                 provider._tools(body, session, True)
                 encoded = body['tools'] if api == 'responses' else [t['function'] for t in body['tools']]
                 self.assertTrue(all('description' not in d for d in encoded))
-                self.assertEqual(session.definitions(), definitions)
+                self.assertEqual(session.wire_definitions(), definitions)
                 self.assertEqual(provider.last_offered_tools, definitions)
                 self.assertIn(tool_documentation(definitions), messages[0]['content'])
                 self.assertEqual(json.loads(messages[-1]['content']), projected.current)

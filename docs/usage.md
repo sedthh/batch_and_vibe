@@ -319,7 +319,15 @@ chat history so old tool usage does not confuse the new build. Saved creature
 memories are kept. An ordinary mod restart keeps both.
 
 Fixed instructions go before changing memory and observations to help provider
-prompt caches. GPT-5.4-mini uses automatic prefix caching, with no extra cache-write
+prompt caches. Island roster data also follows the fixed instructions. On OpenAI's
+Responses API, tool definitions stay fixed as hands, learned miracles and movement
+options change. The current `capabilities` lists describe what is available;
+`allowed_tools` restricts callable tools, and the host still checks each action,
+spell, target and map boundary. Other endpoints retain request-specific schemas.
+This preserves historical observation details; it does not slow automatic ticks
+or reduce tool rounds. Savings depend on how often capabilities change and which
+prefixes the provider has cached.
+GPT-5.4-mini uses automatic prefix caching, with no extra cache-write
 fee; trimming history can still reuse the unchanged prefix. Supported GPT-5.6/6
 Responses models use an explicit breakpoint before the changing data. Gemini uses
 its automatic cache; Claude's compatibility API does not support caching. No

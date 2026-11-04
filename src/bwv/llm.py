@@ -325,7 +325,7 @@ class LLMProvider:
                 'offered_tools':deepcopy(self.last_offered_tools)}
 
     def _tools(self, body, session, enabled):
-        definitions = session.definitions()
+        definitions = session.wire_definitions() if hasattr(session,'wire_definitions') else session.definitions()
         self.last_offered_tools=deepcopy(definitions) if enabled else []
         messages = body.get('input' if self.config.api == 'responses' else 'messages', [])
         # Keep descriptions in exactly one place. Other/legacy tool sessions
@@ -335,10 +335,16 @@ class LLMProvider:
         body['tools'] = definitions if self.config.api == 'responses' else [
             {'type':'function','function':{k:v for k,v in d.items() if k!='type'}} for d in definitions]
         body['tool_choice'] = 'auto' if enabled else 'none'
+        allowed = None
+        if (self.config.api=='responses' and urlsplit(self.config.base_url).hostname=='api.openai.com'
+                and getattr(session,'stable_wire_tools',False)):
+            allowed = [{'type':'function','name':d['name']} for d in session.definitions()]
+            if enabled:
+                body['tool_choice'] = {'type':'allowed_tools','mode':'auto','tools':allowed} if allowed else 'none'
         body['parallel_tool_calls'] = False
         if self.config.api == 'responses':
             body['include'] = ['reasoning.encrypted_content']
-        return {d['name'] for d in definitions}
+        return {d['name'] for d in (allowed if allowed is not None else definitions)}
 
     def _tool_calls(self, data):
         if self.config.api == 'responses':
@@ -501,6 +507,7 @@ class LLMProvider:
             self.error_stage='request_preparation'
             session=self.tool_factory() if self.tool_factory and self.config.max_tool_rounds else None
             if session is not None:
+                if hasattr(session,'configure_provider'):session.configure_provider(self.config)
                 session.bind_request(request)
                 if hasattr(session,'project_request'):request=session.project_request(request)
             elif self.tool_factory is not None:
@@ -534,7 +541,10 @@ class LLMProvider:
                         if not enabled or not offered:raise ProviderError('action_not_selected')
                         # A correction is not another opportunity to promise an
                         # action in prose. The model must inspect or select one.
-                        body['tool_choice']='required'
+                        if isinstance(body.get('tool_choice'),dict) and body['tool_choice'].get('type')=='allowed_tools':
+                            body['tool_choice']={**body['tool_choice'],'mode':'required'}
+                        else:
+                            body['tool_choice']='required'
                     if session:
                         await validate_session()
                         messages_key='input' if self.config.api=='responses' else 'messages'
@@ -620,7 +630,7 @@ class LLMProvider:
                             self.last_tool_error={'tool':name,'stage':'arguments',**deepcopy(output)}
                             self.errors.record('invalid_tool_arguments','tool_arguments',error=error,
                                 details={**self.last_tool_error,'request_number':self.calls,'tool_round':self.tool_rounds+1,
-                                    'expected_parameters':next(d['parameters'] for d in session.definitions() if d['name']==name)})
+                                    'expected_parameters':next((d['parameters'] for d in session.definitions() if d['name']==name), None)})
                             session.trace.append({'tool':name,'result':deepcopy(output)})
                         except (ValueError,TypeError) as error:
                             self.last_tool_error={'tool':name,'stage':'tool_execution',

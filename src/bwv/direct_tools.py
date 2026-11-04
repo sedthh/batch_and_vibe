@@ -4,7 +4,7 @@ from dataclasses import replace
 import json
 import re
 
-from .creature_tools import CreatureToolSession, ToolArgumentError, ToolContextUnavailable, schema
+from .creature_tools import CreatureToolSession, ToolArgumentError, ToolContextUnavailable, schema, ACTION_CATALOG
 from .expressions import GESTURE_ACTIONS, HELD_GESTURES, expression_from_speech
 from .world_actions import NEARBY_TARGET_DISTANCE, KNOWN_TARGET_DISTANCE, HELD_MIRACLE_ACTIONS, WORLD_ACTIONS
 from .positions import checked_position, position_target
@@ -24,6 +24,8 @@ HELD_RECIPES = {'put_down':('put_down',), 'eat':('eat_held',), 'discard':('disca
                 'bring_home':('bring_home',), 'examine':('examine_held',),
                 'throw_at':('throw_held_at',), 'cast_miracle':HELD_MIRACLE_ACTIONS}
 MOVEMENT_RECIPES = ('approach_hand','approach_object','move_to','move_to_position')
+_HIDDEN_RECIPES = (*MOVEMENT_RECIPES, *EATING_RECIPES.values(), *FISHING_RECIPES.values(),
+                   *(r for values in HELD_RECIPES.values() for r in values))
 # Per-page work, separate from the number of successful results requested.
 TARGET_LOOKUPS_PER_PAGE = 16
 
@@ -60,15 +62,20 @@ class DirectCreatureToolSession:
         self.target_searches={}
         self.selected_public_action=None
         self._object_metadata=None
+        self.stable_wire_tools=True
+
+    def configure_provider(self, config):
+        from urllib.parse import urlsplit
+        # Other compatible servers keep request-specific schemas. Do not assume
+        # support for OpenAI's allowed_tools constraint on those endpoints.
+        self.stable_wire_tools=(config.api=='responses' and urlsplit(config.base_url).hostname=='api.openai.com')
 
     def bind_request(self, request):
         self.inner.bind_request(request)
         self.position_bounds=request.current.get('snapshot',{}).get('action_targets',{}).get('move_to_position',{}).get('map_size')
         self.actions=tuple(a for a in self.inner.action_candidates if a not in GESTURE_ACTIONS and a!='move_to_position')
         self.spells=tuple(dict.fromkeys(spell_name(a) for a in self.actions if a.startswith('cast_')))
-        hidden=(*MOVEMENT_RECIPES,*EATING_RECIPES.values(),*FISHING_RECIPES.values(),
-                *(r for values in HELD_RECIPES.values() for r in values))
-        self.menu=tuple(a for a in self.actions if not a.startswith('cast_') and a not in hidden)
+        self.menu=tuple(a for a in self.actions if not a.startswith('cast_') and a not in _HIDDEN_RECIPES)
         if any(a in self.actions for a in EATING_RECIPES.values()):self.menu+=('eat',)
         if any(a in self.actions for a in FISHING_RECIPES.values()):self.menu+=('fish',)
         if self.spells:self.menu+=('cast_miracle',)
@@ -99,9 +106,10 @@ class DirectCreatureToolSession:
         current.pop('capabilities', None)
         # Gesture descriptions live only in the fixed system prompt. The host
         # still checks whether a returned cue can execute against this offer.
-        capabilities={}
-        # Action enums already live in the offered schemas/generated reference.
-        # Keep only details those enums cannot express in the current snapshot.
+        # Stable schemas describe syntax; this request's capabilities grant use.
+        # Empty lists explicitly revoke availability from earlier observations.
+        capabilities={'actions':list(self.menu), 'held_actions':list(self.held_menu),
+                      'movement_destinations':[]}
         if 'fish' in self.menu:
             capabilities['fishing_destinations']=[destination for destination,recipe in FISHING_RECIPES.items()
                                                    if recipe in self.actions]
@@ -111,6 +119,8 @@ class DirectCreatureToolSession:
                 ('god_hand','approach_hand' in self.actions),
                 ('player_temple','move_to' in self.actions),
                 ('coordinates',bool(self.position_bounds and 'move_to_position' in self.inner.action_candidates))) if available]
+            if 'coordinates' in capabilities['movement_destinations']:
+                capabilities['coordinate_bounds']=deepcopy(self.position_bounds)
         if self.spells:
             learning=current.get('snapshot',{}).get('self',{}).get('learning',{})
             attempts={}
@@ -129,7 +139,7 @@ class DirectCreatureToolSession:
                 # tools and deliberately removes candidates from observations.
                 message['content']=model_system_prompt(message['content'])
                 message['content']=generated_section(message['content'], 'tool-reference',
-                    tool_documentation(self.definitions()))
+                    tool_documentation(self.wire_definitions()))
             if message.get('role') in ('user','assistant'):
                 try:message['content']=json.dumps(model_turn(json.loads(message['content'])),ensure_ascii=False)
                 except (ValueError,TypeError):pass
@@ -139,9 +149,29 @@ class DirectCreatureToolSession:
         return replace(request,current=current,messages=tuple(messages))
 
     def definitions(self):
+        """Request-specific validation rules, independent of provider schemas."""
+        return self._definitions(stable=False)
+
+    def wire_definitions(self):
+        """Fixed syntax across live availability changes; grants no execution rights."""
+        return self._definitions(stable=self.stable_wire_tools)
+
+    def _definitions(self, *, stable):
+        if stable:
+            actions=tuple(a for a in ACTION_CATALOG if a not in GESTURE_ACTIONS)
+            menu=tuple(a for a in actions if not a.startswith('cast_') and a not in _HIDDEN_RECIPES)
+            menu+=('eat','fish','cast_miracle')
+            held_menu=tuple(HELD_RECIPES)
+            search_actions=tuple(dict.fromkeys((*menu,'move_to','throw_at')))
+        else:
+            menu,held_menu,spells,search_actions=self.menu,self.held_menu,self.spells,self.search_actions
         result=[deepcopy(d) for d in self.inner.definitions() if d['name'] not in ('search_actions','do_action','inspect_surrounding','find_objects','inspect_object')]
-        action={'type':['string','null'],'enum':[None,*self.search_actions],'maxLength':64}
-        miracle={'type':['string','null'],'enum':[None,*self.spells],'maxLength':64}
+        action={'type':['string','null'],'enum':[None,*search_actions],'maxLength':64}
+        miracle={'type':['string','null'],'maxLength':64}
+        if stable:
+            miracle['description']='For a learned cast, use a spell name from current capabilities.miracle_attempts. Otherwise null.'
+        else:
+            miracle['enum']=[None,*spells]
         center={'type':['string','null'],'enum':[None,'creature','god_hand'],'maxLength':16}
         result.append(schema('find_objects','Describe known objects without checking action compatibility. scope=nearby limits to 360 units, known (default) includes near and far, distant excludes nearby. center defaults to creature; god_hand uses the player hand. detail=brief (default) returns identities and essential observations; detailed adds available object details and linked towns. Start offset=0; follow next_offset. Pages retain their object list for this request; offset=0 refreshes it. Does not move or act.',
             {'type':{'type':['string','null'],'maxLength':64,
@@ -165,19 +195,19 @@ class DirectCreatureToolSession:
              'action':action,'miracle':miracle,'center':center,
              'source':{'type':['string','null'],'enum':[None,'world','held']},
              'object_id':{'type':['string','null'],'maxLength':96}}))
-        if self.menu:
+        if menu:
             result.append(schema('do_action','Select ONE world action for this reply. target accepts an observed object_id directly: the backend resolves its current action capability without another model lookup. A fresh compatible target_id also works. eat chooses storage, field, tree or food-pile feeding from the object. fish uses target=self to catch and eat; target=god_hand catches and delivers to the hand ground position when execution starts; target=player_temple takes fish home; a storage or worship-site object_id delivers fish there. Delivery does not eat the catch. These are single native sequences; the engine finds the nearest fishing spot, so move elsewhere first to fish there. drink uses target=self: the engine finds natural water, approaches it and attempts drinking. Move near the desired river, pond or shore first; drink does not consume Water miracles or target an object ID. cast_miracle needs an offered miracle name; other actions use miracle=null. target=self is only for offered self actions/casts. Pickup acts on a world object. Movement uses move_to; held items use use_held_object. Selection is not execution or success.',
-                {'action':{'type':'string','enum':list(self.menu),'minLength':1,'maxLength':64},
+                {'action':{'type':'string','enum':list(menu),'minLength':1,'maxLength':64},
                  'target':{'type':['string','null'],'minLength':1,'maxLength':96},'miracle':miracle}))
-        if self.held_menu:
+        if held_menu:
             result.append(schema('use_held_object','Select one action using the object currently in your hand: put_down, discard, eat, bring_home, examine, throw_at or cast_miracle. For put_down/discard/eat/bring_home/examine use target=null (current held object). examine returns available held-item details and selects native physical examination in this single call, randomly choosing examine, shake or smell (never stroke). A held-item emoji in the final speech chooses its exact gesture instead, still as one action. All these gestures require something in your own hand. inspect_object on your own held item does the same. Details are observations, not proof of animation playback. inspect_self remains read-only. put_down places gently; discard tosses it away without aiming, with engine-controlled direction and landing. bring_home carries the held item to your native home and releases it there in one request; the bridge selects the native food, toy or general-object routine. It does not fetch an unheld object or supply a village store. No separate movement or put-down call is needed. throw_at and cast_miracle accept an observed destination object_id directly, or a fresh compatible target_id; cast_miracle also accepts self if offered. find_targets(action=throw_at or cast_miracle, source=held, miracle=null) can find compatible destinations when needed. The held bubble determines its spell and is consumed even if the cast fails. Empty hands alone do not prove eating or delivery home. Shares the one physical action limit with all other action tools.',
-                {'action':{'type':'string','enum':list(self.held_menu)},
+                {'action':{'type':'string','enum':list(held_menu)},
                  'target':{'type':['string','null'],'minLength':1,'maxLength':96}}))
-        if self.can_move:
+        if stable or self.can_move:
             targets=[{'type':'string','minLength':1,'maxLength':96}]
-            if self.position_bounds and 'move_to_position' in self.inner.action_candidates:
+            if stable or self.position_bounds and 'move_to_position' in self.inner.action_candidates:
                 targets.append({'type':'object','properties':{axis:{'type':'number','exclusiveMinimum':0,
-                    'exclusiveMaximum':self.position_bounds[axis]} for axis in ('x','z')},
+                    **({} if stable else {'exclusiveMaximum':self.position_bounds[axis]})} for axis in ('x','z')},
                     'required':['x','z'],'additionalProperties':False})
             result.append(schema('move_to','Move to target: an observed object_id, a fresh movement target_id fallback, god_hand, player_temple, or explicit {x,z} coordinates when offered. Uses the same target IDs as other action tools. Prefer IDs for objects. Come to me means the live god_hand; auto runs toward it. Else auto uses native pace. Coordinates are fixed locations, never inferred from an object you can target by ID. Movement does not pick up or interact; arrival is confirmed separately. Shares the one physical action limit.',
                 {'target':{'anyOf':targets},
@@ -186,7 +216,7 @@ class DirectCreatureToolSession:
         # catalog, not a second handwritten list in the system prompt.
         for definition in result:
             if definition['name']=='do_action':
-                definition['description']+=' '+ ' '.join(a+': '+WORLD_ACTIONS[a] for a in self.menu if a in WORLD_ACTIONS)
+                definition['description']+=' '+ ' '.join(a+': '+WORLD_ACTIONS[a] for a in menu if a in WORLD_ACTIONS)
             props=definition['parameters']['properties']
             if 'kind' in props:
                 props['type']=props.pop('kind')
@@ -242,7 +272,13 @@ class DirectCreatureToolSession:
         for key,value in args.items():
             rule=props[key]
             if name=='move_to' and key=='target':continue  # Validated by _move.
-            if 'enum' in rule and value not in rule['enum']:raise ToolArgumentError('value_not_offered',parameter=key)
+            if 'enum' in rule and value not in rule['enum']:
+                error=ToolArgumentError('value_not_offered',parameter=key)
+                # The fixed provider schema can accept values that this request
+                # cannot execute. Give the model the actual choices to recover.
+                error.result.update(allowed_values=deepcopy(rule['enum']),
+                    hint='Choose an allowed value for this request; historical availability may be stale.')
+                raise error
             if value is None and 'null' in rule.get('type',[]):continue
             if 'array' in rule['type']:
                 if not isinstance(value,list) or not rule.get('minItems',0)<=len(value)<=rule['maxItems']:
