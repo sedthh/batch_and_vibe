@@ -306,12 +306,16 @@ class LLMProvider:
     def message_limit_reached(self):
         return self.config.max_messages is not None and self.messages >= self.config.max_messages
 
+    def status_error(self):
+        """Lightweight indicator state without copying full provider diagnostics."""
+        return self.last_error or ('message_limit_reached'
+            if self.message_limit_reached() and not self.active else None)
+
     def status(self):
         return {'requests': self.calls, 'messages': self.messages, 'message_limit': self.config.max_messages,
                 'messages_remaining': (None if self.config.max_messages is None else
                     max(0, self.config.max_messages-self.messages)),
-                'ready': self.ready(), 'last_error': (self.last_error or ('message_limit_reached'
-                    if self.message_limit_reached() and not self.active else None)),
+                'ready': self.ready(), 'last_error': self.status_error(),
                 'retry_after_seconds': max(0, math.ceil(self.blocked_until-self.clock())),
                 'disabled': self.disabled, 'last_usage': dict(self.usage),
                 'token_usage':self.token_usage.snapshot(),

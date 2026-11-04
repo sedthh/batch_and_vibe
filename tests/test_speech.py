@@ -166,8 +166,9 @@ class SpeechApiTests(unittest.TestCase):
 class SpeechAudioTests(unittest.TestCase):
     def test_windows_receives_words_without_emoji_cues(self):
         with patch('bwv.speech_audio.windows_speech',return_value=wav()) as local:
-            Synthesizer(SpeechSettings(enabled=True),'unused').synthesize('Hello 👋 friend',threading.Event())
+            Synthesizer(SpeechSettings(enabled=True,volume=35),'unused').synthesize('Hello 👋 friend',threading.Event())
             self.assertEqual(local.call_args.args[0]['text'],'Hello friend')
+            self.assertEqual(local.call_args.args[0]['volume'],35)
 
     def test_windows_uses_plain_data_and_audio_decoder_rejects_corruption(self):
         config=SpeechSettings(enabled=True)
@@ -194,10 +195,33 @@ class SpeechAudioTests(unittest.TestCase):
         stream.write.side_effect=write
         sd=SimpleNamespace(RawOutputStream=Mock(return_value=stream))
         with patch.dict('sys.modules',sounddevice=sd):
-            play_audio((b'\x10\x00'*4800,24000,1),SpeechSettings(volume=50,output_device='Fixture output'),cancelled)
+            play_audio((b'\x10\x00'*4800,24000,1),SpeechSettings(provider='openai',volume=50,output_device='Fixture output'),cancelled)
         self.assertEqual(writes[0],b'\x08\x00'*1200)
         self.assertEqual(sd.RawOutputStream.call_args.kwargs['device'],'Fixture output')
         stream.abort.assert_called_once()
+
+    def test_native_volume_and_full_volume_play_without_python_scaling(self):
+        pcm=b'\x10\x00'*2500
+        for config in (SpeechSettings(volume=35),SpeechSettings(provider='openai',volume=100)):
+            stream=Mock();stream.__enter__=Mock(return_value=stream);stream.__exit__=Mock(return_value=False)
+            sd=SimpleNamespace(RawOutputStream=Mock(return_value=stream))
+            with patch.dict('sys.modules',sounddevice=sd),patch('bwv.speech_audio.array',
+                    side_effect=AssertionError('Unnecessary Python sample processing')):
+                play_audio((pcm,24000,1),config,threading.Event())
+            self.assertEqual(b''.join(call.args[0] for call in stream.write.call_args_list),pcm)
+
+    def test_volume_scaling_is_bounded_and_preserves_stereo_samples(self):
+        from array import array
+        pcm=array('h',[32767,-32768,100,-100]*2500).tobytes()
+        stream=Mock();stream.__enter__=Mock(return_value=stream);stream.__exit__=Mock(return_value=False)
+        sd=SimpleNamespace(RawOutputStream=Mock(return_value=stream))
+        with patch.dict('sys.modules',sounddevice=sd),patch('bwv.speech_audio.array',wraps=array) as convert:
+            play_audio((pcm,24000,2),SpeechSettings(provider='openai',volume=50),threading.Event())
+        chunks=[call.args[0] for call in stream.write.call_args_list]
+        self.assertTrue(all(len(chunk)<=4800 for chunk in chunks))
+        self.assertEqual(b''.join(chunks),array('h',[16384,-16384,50,-50]*2500).tobytes())
+        self.assertTrue(all(len(call.args[1])<=4800 for call in convert.call_args_list
+            if isinstance(call.args[1],bytes)))
 
     def test_player_classifies_output_failure_and_clears_it_on_next_success(self):
         synth=Mock();synth.synthesize.return_value=(b'\0\0',24000,1)

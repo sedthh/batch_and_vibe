@@ -39,6 +39,7 @@ try {
     } else {
         if ($request.voice) { $s.SelectVoice($request.voice) }
         $s.Rate=[int]$request.rate
+        $s.Volume=[int]$request.volume
         $stream=New-Object System.IO.MemoryStream
         $s.SetOutputToWaveStream($stream)
         $s.Speak([string]$request.text)
@@ -106,7 +107,7 @@ class Synthesizer:
         if not text:return None
         if c.provider=='windows':
             rate=max(-10,min(10,round(10*math.log2(c.speed))))
-            audio=windows_speech({'text':text,'voice':c.voice,'rate':rate},cancelled,c.timeout_seconds)
+            audio=windows_speech({'text':text,'voice':c.voice,'rate':rate,'volume':c.volume},cancelled,c.timeout_seconds)
             return None if cancelled.is_set() else decode_wav(audio)
         if c.max_requests is not None and self.requests>=c.max_requests:
             raise SpeechError('Speech request limit reached. Change Creature speech limits and Save & apply.')
@@ -168,14 +169,18 @@ def play_audio(audio,config,cancelled):
     try:
         import sounddevice as sd
         pcm,rate,channels=audio
-        samples=array('h',pcm)
-        pcm=array('h',(round(sample*config.volume/100) for sample in samples)).tobytes()
         with sd.RawOutputStream(samplerate=rate,channels=channels,dtype='int16',
                                 device=config.output_device or None) as stream:
             step=max(2,rate//20*channels*2)
             for offset in range(0,len(pcm),step):
                 if cancelled.is_set():stream.abort();return
-                stream.write(pcm[offset:offset+step])
+                chunk=pcm[offset:offset+step]
+                # Windows synthesis already applies volume natively. Scale other
+                # providers in 50 ms chunks instead of one CPU burst for the line.
+                if config.provider!='windows' and config.volume!=100:
+                    samples=array('h',chunk)
+                    chunk=array('h',(round(sample*config.volume/100) for sample in samples)).tobytes()
+                stream.write(chunk)
     except Exception:raise SpeechPlaybackError('Cannot play creature speech. Check the output device and audio support.') from None
 
 

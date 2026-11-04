@@ -5,7 +5,7 @@ import unittest
 from unittest.mock import Mock
 
 from bwv.launcher_status import configuration_status,runtime_status,short_name
-from bwv.llm import LLMConfig
+from bwv.llm import LLMConfig,LLMProvider
 from bwv.voice import VoiceSettings
 from bwv.speech import SpeechSettings
 
@@ -49,9 +49,9 @@ class LauncherStatusTests(unittest.TestCase):
     def test_runtime_toggle_and_provider_error_update_and_recover(self):
         rows=self.rows(LLMConfig('fixture'))
         runtime=SimpleNamespace(automatic=True,is_llm=True,provider=Mock(config=LLMConfig('fixture')))
-        runtime.provider.status.return_value={'last_error':None}
+        runtime.provider.status_error.return_value=None
         self.assertEqual(runtime_status(rows,runtime),rows)
-        runtime.provider.status.return_value={'last_error':'PRIVATE raw message'}
+        runtime.provider.status_error.return_value='PRIVATE raw message'
         updated=runtime_status(rows,runtime)
         self.assertEqual(updated[0],('LLM thinking','fixture — provider issue','warning'))
         self.assertNotIn('PRIVATE',str(updated))
@@ -59,5 +59,22 @@ class LauncherStatusTests(unittest.TestCase):
         self.assertEqual(runtime_status(rows,runtime)[0],('LLM thinking','disabled','disabled'))
         runtime.automatic=True;runtime.is_llm=False
         self.assertEqual(runtime_status(rows,runtime)[0][2],'disabled')
-        runtime.is_llm=True;runtime.provider.status.return_value={'last_error':None}
+        runtime.is_llm=True;runtime.provider.status_error.return_value=None
         self.assertEqual(runtime_status(rows,runtime),rows)
+        runtime.provider.status.assert_not_called()
+
+    def test_indicator_checks_limits_without_building_diagnostics(self):
+        provider=LLMProvider.__new__(LLMProvider)
+        provider.config=LLMConfig('fixture',max_messages=2)
+        provider.messages=2;provider.active=0;provider.last_error=None
+        provider.status=Mock(side_effect=AssertionError('Full diagnostic snapshot requested'))
+        runtime=SimpleNamespace(automatic=True,is_llm=True,provider=provider)
+        rows=self.rows(provider.config)
+        self.assertEqual(runtime_status(rows,runtime)[0][2],'warning')
+        provider.active=1
+        self.assertEqual(runtime_status(rows,runtime)[0][2],'ok')
+        provider.active=0;provider.messages=1
+        self.assertEqual(runtime_status(rows,runtime)[0][2],'ok')
+        provider.last_error='rate_limited'
+        self.assertEqual(runtime_status(rows,runtime)[0][2],'warning')
+        provider.status.assert_not_called()
