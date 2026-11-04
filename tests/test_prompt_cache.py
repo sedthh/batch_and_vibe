@@ -12,6 +12,20 @@ from test_llm import request, envelope
 
 
 class PromptCacheTests(unittest.TestCase):
+    def test_island_roster_follows_fixed_rules_without_changing_cache_key(self):
+        config=LLMConfig('gpt-5.4-mini')
+        keys=[]
+        for identity in ('first-island', 'second-island'):
+            roster='## Current island gods and registered creatures (data)\n\n'+json.dumps({'island':identity})
+            original='Rules\n\n'+roster+'\n\nLater fixed instructions'
+            stable,data=system_parts(original)
+            self.assertEqual(stable,'Rules\n\nLater fixed instructions')
+            self.assertEqual(data,'\n\n'+roster)
+            ordered=ordered_system(original)
+            self.assertEqual(ordered_system(ordered),ordered)
+            keys.append(cached_request({'input':[{'role':'system','content':original}]},config)['prompt_cache_key'])
+        self.assertEqual(keys[0],keys[1])
+
     def test_data_moves_after_instructions_without_loss_or_interpreting_escaped_text(self):
         instructions='## Character\r\n\nA pet: {literal} \\ 日本語 🐄\n'
         memory=ConversationMemory()

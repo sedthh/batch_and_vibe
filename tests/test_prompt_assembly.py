@@ -83,7 +83,7 @@ class PromptAssemblyTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(text.count(WIRE_CONTRACT), 1)
                         self.assertIn(f'At most {rounds} tool rounds and 4 individual tool calls', text)
                         if rounds:
-                            self.assertIn(tool_documentation(session.definitions()), text)
+                            self.assertIn(tool_documentation(session.wire_definitions()), text)
                         key = 'input' if api=='responses' else 'messages'
                         self.assertEqual(body[key], messages)
                         self.assertEqual(provider.calls, 0)

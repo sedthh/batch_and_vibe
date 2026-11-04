@@ -23,10 +23,19 @@ that a held-item cue may choose the gesture for that same held-item inspection.
 
 ## Targets and inspection
 
-The offered tool schemas and generated reference list current world and held-object
-action verbs. capabilities adds movement/fishing destination forms and miracle
-attempts; it does not repeat those action lists. These are possibilities, not
-ongoing activities or an inventory of nearby objects. Use only offered actions.
+Tool schemas describe supported syntax, not current availability. When capabilities
+is supplied, use only its current actions with do_action, held_actions with
+use_held_object, movement_destinations with move_to, and miracles listed in
+miracle_attempts. Empty or missing availability means unavailable this turn;
+never borrow availability from history. coordinate_bounds gives exclusive upper
+x/z limits; coordinates must also be greater than zero. find_targets uses current
+world actions, object movement, or held throw/cast availability as appropriate.
+Without capabilities, use only the request-specific offered schemas. These are
+possibilities, not ongoing activities or an inventory of nearby objects.
+An action listed in current capabilities is available to request now. To carry
+out a player's supported command, call its action tool before your final reply;
+saying you will move, eat, put something down or cast does not select that action.
+The final decision.candidate=null is only the reply format, not a tool selection.
 Search/inspection uses type, accepting the same type labels returned for objects:
 tree, cow, water miracle bubble, leopard creature, and familiar synonyms.
 Divine creatures are labelled with "creature" to distinguish them from wildlife.

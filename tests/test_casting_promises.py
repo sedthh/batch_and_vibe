@@ -11,6 +11,15 @@ from test_llm import envelope, reply
 
 
 class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
+    def assert_choice(self, wire, mode, api):
+        choice=wire['tool_choice']
+        if api=='responses':
+            self.assertEqual(choice['type'],'allowed_tools')
+            self.assertEqual(choice['mode'],mode)
+            self.assertTrue(choice['tools'])
+        else:
+            self.assertEqual(choice,mode)
+
     async def test_movement_promise_requires_hand_action_on_both_protocols(self):
         from test_action_tools import action_request
         from test_creature_tools import frame
@@ -33,7 +42,9 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
                 result=await provider.respond(request)
                 self.assertEqual(result['decision'],{'candidate':'approach_hand'})
                 self.assertEqual(len(wires),3)
-                self.assertEqual(wires[1]['tool_choice'],'required')
+                self.assert_choice(wires[1],'required',api)
+                if api=='responses':
+                    self.assertEqual(wires[0]['tool_choice']['tools'],wires[1]['tool_choice']['tools'])
                 self.assertEqual(len(session.trace),1)
             finally:await provider.close()
 
@@ -72,9 +83,9 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(wires),4)
                 self.assertEqual(sum(t['tool']=='do_action' for t in session.trace),1)
                 self.assertIn('No action has been selected',json.dumps(wires[1]))
-                self.assertEqual(wires[0]['tool_choice'],'auto')
-                self.assertEqual(wires[1]['tool_choice'],'required')
-                self.assertEqual(wires[2]['tool_choice'],'auto')
+                self.assert_choice(wires[0],'auto',api)
+                self.assert_choice(wires[1],'required',api)
+                self.assert_choice(wires[2],'auto',api)
                 self.assertEqual(provider.tool_rounds,3)
                 self.assertEqual(provider.usage['input_tokens'],40)
             finally:await provider.close()
@@ -118,7 +129,7 @@ class CastingPromiseTests(unittest.IsolatedAsyncioTestCase):
             try:
                 with self.assertRaisesRegex(ProviderError,'action_not_selected'):await provider.respond(request)
                 self.assertEqual(len(wires),2)
-                self.assertEqual(wires[-1]['tool_choice'],'required')
+                self.assert_choice(wires[-1],'required',api)
                 self.assertIsNone(session.inner.selected_action)
             finally:await provider.close()
 
