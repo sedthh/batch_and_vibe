@@ -58,7 +58,7 @@ def runtime_status(rows,runtime):
     label,description,state=rows[0]
     if not runtime.automatic or not runtime.is_llm:
         first=(label,'disabled','disabled')
-    elif runtime.provider.status().get('last_error'):
+    elif runtime.provider.status_error():
         first=(label,short_name(runtime.provider.config.model)+' — provider issue','warning')
     else:first=(label,description,state)
     return (first,*rows[1:])
