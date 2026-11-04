@@ -21,6 +21,7 @@ from importlib.resources import files as package_files
 from .cadence import CadenceSettings
 from .prompt_settings import PromptSettings
 from .voice import VoiceSettings
+from .speech import SpeechSettings
 from .creature_tools import ToolArgumentError, ToolContextUnavailable, TOOL_CONTRACT
 from copy import deepcopy
 from .token_usage import TokenUsage
@@ -56,8 +57,12 @@ class LLMConfig:
     music_lyrics_online: bool = False
     prompts: PromptSettings = field(default_factory=PromptSettings)
     voice: VoiceSettings = field(default_factory=VoiceSettings)
+    speech: SpeechSettings = field(default_factory=SpeechSettings)
 
     def __post_init__(self):
+        if isinstance(self.speech,dict):
+            object.__setattr__(self,'speech',SpeechSettings.parse(self.speech))
+        if not isinstance(self.speech,SpeechSettings):raise ValueError('Invalid creature speech settings')
         if isinstance(self.voice, dict):
             object.__setattr__(self, 'voice', VoiceSettings.parse(self.voice))
         if not isinstance(self.voice, VoiceSettings):

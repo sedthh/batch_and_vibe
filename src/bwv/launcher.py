@@ -60,7 +60,7 @@ def show_install_success(*, continuing=False, uninstall=False):
                'The mod bridge is installed and verified.\n'
                'Chat history cleared. Saved memories kept.\n\n'
                + ('Press OK to continue starting the mod.' if continuing else
-                  'Start the mod with Start-Mod.cmd before launching Black & White.'))
+                  'Run Start-Mod.cmd, accept administrator access, then use its Run B&W buttons (including VR).'))
     try:
         user = ctypes.WinDLL('user32', use_last_error=True)
         user.MessageBoxW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint]

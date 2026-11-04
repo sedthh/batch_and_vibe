@@ -23,6 +23,62 @@ def payload(now=100,text='Hello there.'):
 
 
 class VrTests(unittest.TestCase):
+    def test_readiness_waits_through_scenes_and_long_dialogue_then_never_repeats(self):
+        native=state();cap=native['action_probe']['vr_caption'];cap.update(notices=True,busy=True,submitted=0)
+        sender=Mock(return_value=True);clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        mirror.set_voice_readiness('Voice input off. Enable it in Settings > Voice.')
+        hidden=payload(text='');hidden['source']['observation']['cutscene']=True
+        mirror.update(hidden)
+        for now in (110,150,200):
+            clock[0]=now;mirror.update(payload(now=now,text=''))
+        sender.assert_not_called()
+        cap['busy']=False;clock[0]=202;mirror.update(payload(now=202,text=''))
+        self.assertEqual(sender.call_count,1)
+        self.assertIn('[Voice input off.',sender.call_args.args[1][40:].decode('utf-16-le'))
+        cap.update(busy=True,submitted=1);clock[0]=204;mirror.update(payload(now=204,text=''))
+        cap['busy']=False
+        # A scene loss, a new game session and repeated reports must not reset the latch.
+        mirror.update(hidden);native['session']=2
+        for now in (210,250):
+            clock[0]=now;data=payload(now=now,text='')
+            data['source']['observation'].update(session='123:2',
+                creature_id=hashlib.sha256(b'123:2:200:300').hexdigest()[:24])
+            mirror.set_voice_readiness('Voice input off. Enable it in Settings > Voice.')
+            mirror.update(data)
+        self.assertEqual(sender.call_count,1)
+
+    def test_undisplayed_readiness_retries_and_new_status_supersedes_pending(self):
+        native=state();cap=native['action_probe']['vr_caption'];cap.update(notices=True,submitted=0)
+        sender=Mock(return_value=True);clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        mirror.set_voice_readiness('Voice input ready. Hold F11 to speak.');mirror.update(payload(text=''))
+        cap['queued']=True;clock[0]=102;mirror.update(payload(now=102,text=''))
+        self.assertEqual(sender.call_count,1)
+        # Native queue was cleared before display; the pending notice remains relevant.
+        cap['queued']=False;clock[0]=104;mirror.update(payload(now=104,text=''))
+        self.assertEqual(sender.call_count,2)
+        cap.update(busy=True,submitted=1)
+        mirror.set_voice_readiness('Voice input stopped: Synthetic failure.')
+        clock[0]=106;mirror.update(payload(now=106,text=''))
+        cap['busy']=False;clock[0]=108;mirror.update(payload(now=108,text=''))
+        self.assertIn('Voice input stopped:',sender.call_args.args[1][40:].decode('utf-16-le'))
+        cap['submitted']=2;clock[0]=110;mirror.update(payload(now=110,text=''))
+        mirror.set_voice_readiness('Voice input ready. Hold F11 to speak.')
+        clock[0]=112;mirror.update(payload(now=112,text=''))
+        self.assertEqual(sender.call_count,4)
+
+    def test_readiness_and_transcript_keep_separate_mailboxes(self):
+        native=state();native['action_probe']['vr_caption'].update(notices=True,submitted=0)
+        sender=Mock(return_value=True);clock=[100]
+        mirror=CaptionMirror(reader=lambda pid:native,sender=sender,clock=lambda:clock[0])
+        mirror.model.update(payload(text=''),100)
+        mirror.set_voice_readiness('Voice input ready.');mirror.queue_voice_notice('Heard: Hello.',mirror.model.identity)
+        mirror.update(payload(text=''))
+        native['action_probe']['vr_caption']['submitted']=1
+        clock[0]=107;mirror.update(payload(now=107,text=''))
+        self.assertIn('[Heard: Hello.]',sender.call_args.args[1][40:].decode('utf-16-le'))
+
     def test_model_failure_is_shown_once_until_recovery_even_across_ticks(self):
         native=state();native['action_probe']['vr_caption']['notices']=True
         sender=Mock();clock=[100]

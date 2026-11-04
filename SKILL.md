@@ -1,6 +1,6 @@
 ---
 name: black-and-white-llm-mod
-description: Set up Black & White and this LLM Creature Mod on Windows, configure local or remote chat and speech-to-text models, run and troubleshoot the mod, or contribute changes to this repository. Use for this mod, not general Black & White gameplay advice or openblack development.
+description: Set up Black & White and this LLM Creature Mod on Windows, edit and validate settings.json for chat, microphone input and creature speech, troubleshoot desktop or VR play, or contribute code. Use for this mod, not general gameplay advice or openblack development.
 ---
 
 # Black & White LLM Creature Mod
@@ -40,6 +40,10 @@ ID, debugger URL, provider or model from another session.
   [roadmap and known limitations](README.md#roadmap-and-known-limitations).
   Treat it as the maintained overview; do not assume planned features already work.
 - For launch flags, provider limitations and uninstalling, read [usage](docs/usage.md).
+- For direct settings.json edits and symptom-based diagnosis, read
+  [agent setup and troubleshooting](docs/agent-setup.md). Use this when asked to
+  configure or fix a setup; edit the requested settings directly instead of only
+  telling the user which UI controls to click.
 - For opt-in BW1-VR subtitles and configurable voice input, read [VR compatibility](docs/vr.md).
 - For code changes, read [contributing](docs/contributing.md) and the relevant source.
 
@@ -61,26 +65,34 @@ ID, debugger URL, provider or model from another session.
    selection needs correcting. Preserve the original DLL backup and install manifest.
 4. Configure the user's chosen chat model and optional voice input using
    [Configure chat and voice models](#configure-chat-and-voice-models) below.
-5. Start `Start-Mod.cmd` before the game, then launch that installation's
-   `runblack.exe` as administrator. The launcher finds the process automatically;
-   users do not need a PID. Check attachment and Ctrl+Enter chat after loading a
-   creature save. Use windowed mode or the launcher's borderless fullscreen option;
-   exclusive fullscreen is unsupported and pauses chat and new model calls.
+5. Run `Start-Mod.cmd`, accept administrator access, and launch the game using
+   this mod's **Run B&W windowed**, **Run B&W borderless fullscreen**, or
+   **Run B&W VR** button. The game and VR launcher inherit administrator access.
+   Check attachment and Ctrl+Enter chat after loading a creature save on desktop.
+   Exclusive desktop fullscreen is unsupported; use the launcher's display modes.
 
 The normal launcher uses configured model calls and enables creature actions and
 automatic thinking. Do not silently switch providers or use a key as permission
 for unrelated paid tests. For a requested offline smoke test, use `--dummy`; it
 replaces chat model calls but **does not disable actions or voice API calls**.
-Add `--no-actions` when the test only needs observation and chat. Disable voice
-or use a downloaded local speech model for offline voice tests. Report which
+Add `--no-actions` when the test only needs observation and chat. Disable API voice
+input and creature speech, or use offline providers, for offline tests. Report which
 mode you started.
 
 ## Configure chat and voice models
 
-Open **Model, API key & settings** in the mod window, or use
+For agent-led setup, prefer targeted, validated edits through `LLMConfig.load`,
+`dataclasses.replace` and `LLMConfig.save`; the [direct-edit reference](docs/agent-setup.md)
+has a runnable example and field map. Use the UI for user-entered credentials and
+interactive previews. Preserve unrelated settings and explain how changes take effect.
+
+Open **Settings** in the mod window, or use
 `Start-Mod.cmd --configure` before starting the mod. Chat and voice have separate
 model settings: the chat LLM decides what to say and do; the optional speech model
-turns microphone audio into chat text. Creature replies are still text.
+turns microphone audio into chat text. The separate **Creature speech** tab can
+read replies aloud using Windows voices, a local Piper server or a speech API;
+see [creature speech](docs/speech.md). It defaults off. Feedback protection is
+optional for headset users. Preserve microphone preferences when enabling speech.
 
 Preserve the user's existing configuration. Let them enter secrets directly in
 the masked settings fields, not in the agent conversation. `settings.json` holds
@@ -135,6 +147,12 @@ precedence over saved keys. Keep the bundled `src/bwv/settings.default.json` gen
    Enter. Disabling voice or leaving its model blank hides the voice shortcut
    and prevents F11 recording. Recording audio is not saved.
 
+For hands-free input, set `voice.push_to_talk=false`. VR does not override input
+preferences; `voice.auto_send=true` is needed to send without desktop review.
+Creature speech is separate: `speech.enabled` controls spoken replies, and
+`speech.feedback_protection` optionally pauses the microphone during playback.
+See [speech setup](docs/speech.md) for Windows voices, Piper and API providers.
+
 Use **Save & apply** in the running mod to reload both configurations without
 closing the game. The standalone configuration form saves for the next launch.
 Manual file edits take effect after reopening settings and saving, or restarting
@@ -186,6 +204,8 @@ The main areas are:
 | Model tools and actions | `src/bwv/direct_tools.py`, `pending_actions.py`, `native/` |
 | Chat display | `src/bwv/overlay.py`, `overlay_windows.py` |
 | Voice input, settings and diagnostics | `src/bwv/voice.py`, `voice_overlay.py`, `voice_settings_ui.py`, `voice_diagnostics.py` |
+| Creature speech and playback | `src/bwv/speech.py`, `speech_audio.py`, `speech_output.py`, `speech_settings_ui.py` |
+| VR subtitles and readiness | `src/bwv/vr.py`, `voice_readiness.py`, `native/vr_caption.h` |
 
 Read current tool definitions before adding capabilities; do not invent callable
 engine functions or treat old QA notes as current behavior. Update tool descriptions

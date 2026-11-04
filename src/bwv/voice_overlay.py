@@ -36,6 +36,7 @@ class VoiceInputMeter:
 class VoiceOverlay:
     def __init__(self, window, config, settings_path, *, service=None):
         self.window, self.config = window, config
+        self.readiness=getattr(window,'voice_readiness',None)
         self.automatic=not config.push_to_talk
         self.auto_failed=False;self.retry_at=0
         if self.automatic:
@@ -62,17 +63,22 @@ class VoiceOverlay:
             and self.window.model.can_show() and self.window.model.identity == self.job.identity
             and (not self.automatic or self.window.model.can_send()))
 
-    def cancel(self):
+    def cancel(self,*,notify=True):
         if self.active:
             self.service.cancel()
             self.active = False
             self.status = ''
-            self.window.notice = '[Voice input cancelled.]'
+            if notify:self.window.notice = '[Voice input cancelled.]'
             self.retry_at=time.monotonic()+.5
 
     def tick(self):
         w = self.window
         down = True if self.automatic else all(w.win.u.GetAsyncKeyState(key) & 0x8000 for key in HOTKEYS[self.config.hotkey])
+        speech=getattr(w,'speech_output',None)
+        if speech is not None and speech.blocks_microphone:
+            if not self.automatic and down:speech.cancel()
+            self.cancel(notify=False);self.was_down=False
+            return
         pressed = down and not self.was_down
         if self.automatic:
             pressed=(not self.auto_failed and time.monotonic()>=self.retry_at and not w.pending
@@ -130,9 +136,11 @@ class VoiceOverlay:
             self.active = False; self.status = ''
             self.auto_failed=self.automatic
             w.notice = '[ERROR: ' + value + (' Save & apply Voice settings to restart activation.' if self.automatic else '') + ']'
-            self.caption('Voice error: '+value)
+            if self.readiness is not None:self.readiness.failed(value)
+            else:self.caption('Voice error: '+value)
         elif kind == 'voice_text':
             self.active = False; self.status = ''
+            if self.readiness is not None:self.readiness.succeeded()
             self.caption('Heard: '+value)
             w.entry.configure(state='normal')
             w.entry.delete(0, 'end'); w.entry.insert(0, value)

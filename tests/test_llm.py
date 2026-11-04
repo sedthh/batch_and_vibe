@@ -517,7 +517,7 @@ class LiveLLMTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('synthetic-secret', json.dumps(data))
         self.assertNotIn(self.directory.name, json.dumps(data))
         effective=data['runtime']['settings']
-        self.assertEqual(set(effective),set(asdict(self.provider.config))-{'api_key_env','voice'})
+        self.assertEqual(set(effective),set(asdict(self.provider.config))-{'api_key_env','voice','speech'})
         self.assertNotIn('OPENAI_API_KEY',json.dumps(effective))
         self.assertEqual(effective['model'],'test-model')
         self.assertEqual(effective['max_tool_calls'],self.provider.config.max_tool_calls)

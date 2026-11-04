@@ -69,7 +69,7 @@ class ObserverSupervisor:
         if target != self.active:
             await self.detach()
         if target is None:
-            self.notices.show('attach', 'Waiting for the game. Launch it normally from the selected folder; reconnect is automatic.')
+            self.notices.show('attach', 'Waiting for the game. Use this mod\'s Run B&W buttons, including Run B&W VR; they inherit its administrator access.')
             return
         if self.task and self.task.done():
             try:
@@ -138,7 +138,7 @@ async def play(root, settings, settings_path, *, dummy=False, actions=True, debu
         emit('Automatic creature thinking enabled.' if automatic else 'Automatic creature thinking off; direct questions remain available.', flush=True)
         if overlay:
             if vr:
-                emit('Experimental VR: replies use game subtitles. Start the game through its VR launcher. '
+                emit('Experimental VR: replies use game subtitles. Use Run B&W VR in this mod window to open the VR launcher with administrator access. '
                      'Configure voice input in Settings > Voice.', flush=True)
             if settings.voice.input_enabled:
                 emit('Voice input enabled: '+('hold '+settings.voice.hotkey+'. ' if settings.voice.push_to_talk else 'automatic speech detection. ')+

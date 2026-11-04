@@ -198,19 +198,28 @@ class OverlayWindow:
         self.hwnd=self.win.u.GetAncestor(self.root.winfo_id(),2)
         self.voice = None
         self.voice_meter = None
+        self.voice_readiness=None
+        self.speech_output=None
         if settings_path is not None:
             from .llm import LLMConfig
             from .voice_overlay import VoiceOverlay, VoiceInputMeter
-            voice = LLMConfig.load(settings_path).voice
+            settings=LLMConfig.load(settings_path)
+            voice = settings.voice
+            if settings.speech.enabled:
+                from .speech_output import SpeechOutput
+                self.speech_output=SpeechOutput(self,settings.speech,settings_path)
             if vr:
                 from .vr import voice_settings
                 voice=voice_settings(voice)
+                from .voice_readiness import VoiceReadiness
+                self.voice_readiness=VoiceReadiness(voice,settings_path,self.captions.set_voice_readiness)
             if voice.input_enabled:
                 self.voice = VoiceOverlay(self, voice, settings_path)
                 self.voice_meter = VoiceInputMeter(self.input_box, font)
                 if voice.push_to_talk:
                     binding = '<'+voice.hotkey.replace('Ctrl+','Control-')+'>'
                     self.entry.bind(binding, lambda event: 'break')
+            if self.voice_readiness is not None:self.voice_readiness.start()
         self.win.own_style(self.hwnd,False)
         self.hotkey_thread=threading.Thread(target=hotkey_loop,
             args=(self.win.u,self.stop,self.want_hotkey,self.emit),daemon=True)
@@ -528,6 +537,7 @@ class OverlayWindow:
         self.advance_submission()
         if not self.game or self.win.pid(self.game)!=self.model.game_pid or not self.win.rect(self.game):
             self.game=self.win.game_window(self.model.game_pid)
+        if getattr(self,'speech_output',None):self.speech_output.tick()
         if getattr(self,'voice',None):self.voice.tick()
         if self.expanded and self.model.can_send() and self.win.u.GetForegroundWindow() not in (0,self.game,self.hwnd):
             self.expanded=False;self.win.own_style(self.hwnd,False)
@@ -538,6 +548,8 @@ class OverlayWindow:
     def close(self):
         if self.closed:return
         self.closed=True;self.stop.set()
+        if getattr(self,'voice_readiness',None):self.voice_readiness.close()
+        if getattr(self,'speech_output',None):self.speech_output.close()
         if getattr(self,'voice',None):self.voice.close()
         self.hotkey_thread.join(.5)
         self.root.destroy()

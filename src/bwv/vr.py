@@ -47,6 +47,38 @@ class CaptionMirror:
         self.key=None;self.pages=[];self.next_poll=0;self.status='waiting'
         self.model_error=None
         self.voice_lock=threading.Lock();self.notice=None;self.last_notice=None
+        self.readiness=None;self.readiness_pending=False;self.readiness_flight=None
+
+    def set_voice_readiness(self,text):
+        # Session-wide, not creature-wide: loading another save must not repeat it.
+        text=' '.join(caption_pages(text))
+        if not text:return
+        text='['+(text if len(text)<=238 else text[:235].rstrip()+'…')+']'
+        with self.voice_lock:
+            if text==self.readiness:return
+            self.readiness=text;self.readiness_pending=True
+
+    def readiness_notice(self,state):
+        capability=state['action_probe']['vr_caption']
+        session=(state['pid'],state.get('session'))
+        with self.voice_lock:
+            if self.readiness_flight:
+                text,old_session,count=self.readiness_flight
+                if session[0]==old_session[0] and capability.get('submitted',0)>count:
+                    if text==self.readiness:self.readiness_pending=False
+                    self.readiness_flight=None
+                elif session!=old_session or not (capability.get('busy') or capability.get('queued')):
+                    self.readiness_flight=None
+                else:return ''
+            if not self.readiness_pending or capability.get('busy') or capability.get('queued'):return ''
+            return self.readiness
+
+    def readiness_sent(self,text,state):
+        with self.voice_lock:
+            count=state['action_probe']['vr_caption'].get('submitted')
+            if type(count) is int:
+                self.readiness_flight=(text,(state['pid'],state.get('session')),count)
+            elif text==self.readiness:self.readiness_pending=False
 
     def queue_voice_notice(self,text,identity):
         # Only completed transcriptions/errors cross this thread-safe mailbox.
@@ -101,13 +133,15 @@ class CaptionMirror:
         capability=probe.get('vr_caption',{})
         if capability.get('version')!=15:
             self.pages=[];self.status='bridge_update_required';return
+        readiness=self.readiness_notice(state)
         if capability.get('busy') or capability.get('queued'):return
-        notice=self.take_notice(now)
+        notice=readiness or self.take_notice(now)
         if notice and capability.get('notices') is not True:
             self.status='bridge_update_required';notice=''
         if not notice and not self.pages:return
         # Consume before sending: a lost acknowledgement must not repeat text.
         page=notice or self.pages.pop(0)
+        if readiness and notice:self.readiness_sent(readiness,state)
         accepted=self.sender(model.game_pid,caption_packet(state,page,notice=bool(notice)))
         self.status='queued' if accepted else 'rejected'
         self.next_poll=now+2

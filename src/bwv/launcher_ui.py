@@ -1,4 +1,4 @@
-"""Small local launcher/settings windows. No network calls or credential display."""
+"""Local launcher/settings windows; only explicit speech previews make audio requests."""
 from dataclasses import asdict, replace
 import json
 import os
@@ -40,7 +40,7 @@ def apply_provider_preset(values, key, name):
     key.set('')
 
 
-def save_basics(path, values, key='', *, voice_key=''):
+def save_basics(path, values, key='', *, voice_key='', speech_key=''):
     """Merge form fields into the latest private settings; preserve advanced fields."""
     path = Path(path)
     data = asdict(LLMConfig.load(path))
@@ -53,6 +53,8 @@ def save_basics(path, values, key='', *, voice_key=''):
     if 'music_lyrics_online' in values:data['music_lyrics_online']=values['music_lyrics_online']
     from .voice_settings_ui import voice_form_values
     data['voice'].update(voice_form_values(values))
+    from .speech_settings_ui import speech_form_values
+    data['speech'].update(speech_form_values(values))
     for field in ('model', 'api', 'base_url', 'output_format', 'token_parameter'):
         data[field] = values[field].strip()
     data['api_key_env'] = values['api_key_env'].strip() or None
@@ -80,12 +82,13 @@ def save_basics(path, values, key='', *, voice_key=''):
     if config.model == 'YOUR_MODEL_ID':
         raise ValueError('Enter the model ID supplied by your provider or local server.')
     credentials = {}
-    for name, secret in ((config.api_key_env, key.strip()), (config.voice.api_key_env, voice_key.strip())):
+    for name, secret in ((config.api_key_env, key.strip()), (config.voice.api_key_env, voice_key.strip()),
+                         (config.speech.api_key_env,speech_key.strip())):
         if not secret: continue
         if name is None or any(ord(c) < 33 or ord(c) > 126 or c in '\"\'' for c in secret):
             raise ValueError('Use a single-line API key and set its environment-variable name.')
         if name in credentials and credentials[name] != secret:
-            raise ValueError('Use different key variable names for different LLM and voice API keys.')
+            raise ValueError('Use different key variable names for different chat, microphone and speech API keys.')
         credentials[name] = secret
     env_path = path.parent / '.local' / '.env'
     content = None
@@ -134,11 +137,22 @@ class SettingsWindow:
             'Saved locally for the next mod start. Saving sends no API requests.')).pack(anchor='w', pady=(4, 10))
         tabs = ttk.Notebook(frame); tabs.pack(fill='both', expand=True)
         connection = ttk.Frame(tabs, padding=12); tabs.add(connection, text='Connection')
-        limits = ttk.Frame(tabs, padding=12)
+        limits_page=ttk.Frame(tabs)
+        limits_canvas=tk.Canvas(limits_page,highlightthickness=0,height=480)
+        limits_scroll=ttk.Scrollbar(limits_page,orient='vertical',command=limits_canvas.yview)
+        limits_scroll.pack(side='right',fill='y');limits_canvas.pack(side='left',fill='both',expand=True)
+        limits_canvas.configure(yscrollcommand=limits_scroll.set)
+        limits=ttk.Frame(limits_canvas,padding=12)
+        limits_item=limits_canvas.create_window(0,0,window=limits,anchor='nw')
+        limits.bind('<Configure>',lambda _:limits_canvas.configure(
+            width=limits.winfo_reqwidth(),scrollregion=limits_canvas.bbox('all')))
+        limits_canvas.bind('<Configure>',lambda event:limits_canvas.itemconfigure(limits_item,width=event.width))
         chat_limits = ttk.LabelFrame(limits, text='Chat limits', padding=8)
         chat_limits.pack(fill='x')
         from .voice_settings_ui import VoiceTab
         self.voice_tab = VoiceTab(tabs, config['voice'], self.values, limits_panel=limits)
+        from .speech_settings_ui import SpeechTab
+        self.speech_tab=SpeechTab(tabs,config['speech'],self.values,self.path,limits_panel=limits)
         vr_panel=ttk.Frame(tabs,padding=12);tabs.add(vr_panel,text='VR')
         self.vr_status=tk.StringVar()
         ttk.Label(vr_panel,textvariable=self.vr_status,wraplength=570).pack(anchor='w',pady=(4,0))
@@ -166,7 +180,7 @@ class SettingsWindow:
         refresh_voice_status()
         ttk.Label(vr_panel,textvariable=voice_status,wraplength=570).pack(anchor='w',pady=(0,4))
         ttk.Button(vr_panel,text='Voice settings',command=lambda:tabs.select(1)).pack(anchor='w')
-        tabs.add(limits, text='Limits')
+        tabs.add(limits_page, text='Limits')
         cadence = ttk.Frame(tabs, padding=12); tabs.add(cadence, text='Timing')
         prompt = ttk.Frame(tabs, padding=12)
         ttk.Label(prompt, text='Customize game background, personality and speaking style.\n'
@@ -267,12 +281,14 @@ class SettingsWindow:
             try:
                 values = {k: v.get() for k, v in self.values.items()}
                 values['general_prompt'] = self.general_prompt.get('1.0', 'end-1c')
-                saved = save_basics(self.path, values, self.key.get(), voice_key=self.voice_tab.key.get())
+                saved = save_basics(self.path, values, self.key.get(), voice_key=self.voice_tab.key.get(),
+                                    speech_key=self.speech_tab.key.get())
             except (ValueError, OSError) as error:
                 self.error.set(str(error))
                 return
             self.key.set('')
             self.voice_tab.key.set('')
+            self.speech_tab.key.set('')
             if on_saved is not None:
                 try:
                     on_saved(saved)
@@ -321,7 +337,24 @@ class StatusWindow:
         self.debug_task = None
         self.game_controls = ttk.Frame(frame)
         self.game_controls.pack(fill='x', before=buttons, pady=(6, 0))
-        self.saved_cut_content = LLMConfig.load(path).reenable_cut_content
+        self.service_indicators=ttk.LabelFrame(self.game_controls,text='Status',padding=6)
+        self.service_indicators.pack(fill='x',pady=(6,0))
+        from tkinter import font as tkfont
+        self.status_font=tkfont.nametofont('TkDefaultFont')
+        self.status_tip=None
+        self.service_labels=[ttk.Label(self.service_indicators,width=1) for _ in range(3)]
+        for index,label in enumerate(self.service_labels):
+            column=index*2
+            self.service_indicators.columnconfigure(column,weight=1,uniform='service')
+            label.grid(row=0,column=column,sticky='ew',padx=4)
+            label.bind('<Configure>',lambda _:self.render_service_indicators())
+            label.bind('<Enter>',lambda _,index=index:self.show_service_status(index))
+            label.bind('<Leave>',lambda _:self.hide_service_status())
+            if index<2:ttk.Separator(self.service_indicators,orient='vertical').grid(row=0,column=column+1,sticky='ns',padx=4)
+        self.status_config=LLMConfig.load(path)
+        self.status_checked_at=0;self.status_rows=None;self.status_drawn=None
+        self.refresh_service_indicators()
+        self.saved_cut_content = self.status_config.reenable_cut_content
         self.cut_content_enabled = tk.BooleanVar(value=self.saved_cut_content)
         self.cut_content_toggle = ttk.Checkbutton(frame, text='Reenable cut content',
             variable=self.cut_content_enabled, command=self.remember_cut_content)
@@ -355,7 +388,7 @@ class StatusWindow:
             self.root.attributes('-disabled', True)
             stop()
 
-        self.settings_button = ttk.Button(buttons, text='Model, API key & settings', command=settings)
+        self.settings_button = ttk.Button(buttons, text='Settings', command=settings)
         self.settings_button.pack(side='left')
         self.stop_button = ttk.Button(buttons, text='Stop mod', command=close)
         self.stop_button.pack(side='right')
@@ -366,6 +399,48 @@ class StatusWindow:
             self.restart(config)
         else:
             self.write(f'Model saved: {config.model}. Restart the mod to apply changes.')
+        self.status_config=config;self.status_checked_at=0
+        self.refresh_service_indicators()
+
+    def refresh_service_indicators(self):
+        import time
+        from .launcher_status import configuration_status,runtime_status
+        if not hasattr(self,'service_labels'):return
+        now=time.monotonic()
+        if self.status_rows is None or now-self.status_checked_at>=2:
+            self.status_rows=configuration_status(self.status_config,self.settings_path)
+            self.status_checked_at=now
+        runtime=self.debug_session.runtime if self.debug_session is not None else None
+        rows=runtime_status(self.status_rows,runtime)
+        if rows!=self.status_drawn:
+            self.status_drawn=rows
+            self.hide_service_status()
+            self.render_service_indicators()
+
+    def render_service_indicators(self):
+        from .launcher_status import COLORS
+        if not getattr(self,'status_drawn',None):return
+        for widget,(label,detail,state) in zip(self.service_labels,self.status_drawn):
+            full='● '+label+': '+detail;text=full
+            width=widget.winfo_width()-4
+            if width>0:
+                while text and self.status_font.measure(text+('…' if text!=full else ''))>width:text=text[:-1]
+                if text!=full:text=text.rstrip()+'…'
+            widget.configure(text=text,foreground=COLORS[state])
+
+    def hide_service_status(self):
+        if getattr(self,'status_tip',None) is not None:
+            self.status_tip.destroy();self.status_tip=None
+
+    def show_service_status(self,index):
+        import tkinter as tk
+        self.hide_service_status()
+        if not self.status_drawn:return
+        label,detail,_=self.status_drawn[index];widget=self.service_labels[index]
+        self.status_tip=tk.Toplevel(self.root);self.status_tip.overrideredirect(True)
+        tk.Label(self.status_tip,text=label+': '+detail,background='#fff9df',foreground='#222222',
+            relief='solid',borderwidth=1,padx=8,pady=4,wraplength=440).pack()
+        self.status_tip.geometry('+%d+%d'%(widget.winfo_rootx(),widget.winfo_rooty()+widget.winfo_height()+4))
 
     def set_restarting(self, restarting):
         self.restarting = restarting
@@ -459,7 +534,7 @@ class StatusWindow:
         self.game_launcher=launcher
         self.root.geometry('780x500')
         self.desktop_controls=ttk.Frame(self.game_controls)
-        self.desktop_controls.pack(fill='x')
+        self.desktop_controls.pack(fill='x',before=self.service_indicators)
         self.size=tk.StringVar(value=self.load_display_size())
         self.size.trace_add('write',self.remember_display_size)
         ttk.Combobox(self.desktop_controls,textvariable=self.size,values=RESOLUTIONS,
@@ -566,6 +641,7 @@ class StatusWindow:
 
     def pump(self):
         self.refresh_debug()
+        self.refresh_service_indicators()
         if self.game_launcher is not None and not self.stopping:
             try:
                 notice=self.game_launcher.poll()
