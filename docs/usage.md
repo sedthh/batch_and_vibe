@@ -2,7 +2,7 @@
 
 For VR support, see [experimental BW1-VR compatibility](vr.md).
 Use **Run B&W VR**, the third button in our start window. Missing installation
-files disable that button; **Model, API key & settings > VR** explains what is
+files disable that button; **Settings > VR** explains what is
 missing. `--vr` also enables native subtitles. Voice settings remain your choice.
 
 Requires Windows, Python 3.11+ with tkinter, and your own Black & White installation.
@@ -14,7 +14,7 @@ compatible. No game files are included.
 1. Close the game and run `Setup-Mod.cmd`. It installs dependencies, builds the
    mod and prompts for the game folder and administrator access.
 2. Run `Start-Mod.cmd`. If model setup is needed, the settings form opens. You can
-   also open it with **Model, API key & settings** in the mod window, or run
+   also open it with **Settings** in the mod window, or run
    `Start-Mod.cmd --configure` to open only the form without starting the mod.
    If the game-side mod bridge is missing, Start-Mod installs the compiled copy
    automatically while the game is closed. Installation shows a success popup.
@@ -24,8 +24,9 @@ compatible. No game files are included.
    Applying a preset clears the model, reasoning selection and unsaved key;
    nothing is saved until you choose Save.
 3. Accept the mod's administrator prompt before launching the game. If you used
-   `--configure`, run `Start-Mod.cmd` now. Launch the game as administrator, then
-   Continue or load a save.
+   `--configure`, run `Start-Mod.cmd` now. Use this mod's **Run B&W windowed**,
+   **Run B&W borderless fullscreen**, or **Run B&W VR** button. The game and VR
+   launcher inherit administrator access. Then Continue or load a save.
 4. Press **Ctrl+Enter** to chat with your creature. Up/Down recalls recent messages.
 
 Commands can include fishing or drinking from natural water. If an action needs empty
@@ -89,7 +90,7 @@ Already-sent requests cannot be un-sent. Windowed mode resumes with fresh observ
 
 ## Voice input
 
-Open **Model, API key & settings → Voice**, enable voice, and choose a preset.
+Open **Settings → Voice**, enable voice, and choose a preset.
 **Push to talk** is checked by default; uncheck it to use voice activation.
 VR mode leaves this control and your transcript sending preference unchanged.
 
@@ -152,10 +153,12 @@ settings again to stop logging. These files are ignored by Git.
 Cancelling discards the result but cannot retract an API request already sent.
 Local mode runs offline after its model download. The resulting words use normal
 creature chat and its existing history, usage limits and action rules. Speech API
-usage is separate from the LLM message cap and token counter. Creature replies are
-still text; this version does not speak them aloud.
+usage is separate from the LLM message cap and token counter. Optional
+[Creature speech](speech.md) reads replies aloud with separate provider, voice
+and playback settings. Its microphone feedback protection can be disabled for
+headset use; it never changes push-to-talk preferences.
 
-The **Voice** tab has optional API limits for transcription requests and total
+The **Limits** tab has optional API limits for transcription requests and total
 audio minutes per run. Leave either blank for unlimited usage. A recording that
 would exceed the audio budget is not uploaded; you can record a shorter message
 or change the limit. Failed requests and requests cancelled after sending count
@@ -171,7 +174,7 @@ The add-on's instructions say to start Winamp before loading the game. Keep that
 setup responsible for playback and the creature's native music reactions; this
 mod neither installs nor disables the add-on and does not add an MP3-folder player.
 
-1. Open **Model, API key & settings → Music**, enable **Connect to Winamp**, and
+1. Open **Settings → Music**, enable **Connect to Winamp**, and
    **Save & apply**. The setting is off by default (`winamp_music: false`).
 2. Play a track in Winamp. Use a single Winamp instance.
 3. Speak, sing or type through ordinary chat. No start/stop phrases or lyric mode
@@ -297,7 +300,7 @@ Microphone recordings still follow your separate voice-provider settings.
 
 ## Settings and debugging
 
-The mod window's **Model, API key & settings** button opens configuration. Settings
+The mod window's **Settings** button opens configuration. Settings
 go in ignored `settings.json`; keys go in ignored `.local/.env`. A blank key field
 keeps the existing key. The **General prompt** tab edits game background, personality
 and speaking style as one text, stored in `prompts.general` in `settings.json`.
@@ -332,7 +335,7 @@ Run these from a terminal in the repository:
 | --- | --- |
 | `Start-Mod.cmd --debug` | Enable and print localhost observer and LLM debugger URLs. |
 | `Start-Mod.cmd --debug --port 8080` | Use a chosen port for both debugger pages. |
-| `Start-Mod.cmd --dummy` | Use dummy chat without paid LLM calls. API voice still has its own charges. |
+| `Start-Mod.cmd --dummy` | Use dummy chat without paid LLM calls. API transcription and creature speech still have their own charges. |
 | `Start-Mod.cmd --no-ticks` | Send direct questions only. |
 | `Start-Mod.cmd --no-actions` | Disable creature commands for diagnosis. |
 | `Start-Mod.cmd --uninstall` | Restore the original DLL; close the game first. |

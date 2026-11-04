@@ -38,8 +38,11 @@ inline bool valid_caption(const wchar_t* text) {
 inline std::wstring styled_caption(const wchar_t* text) {
     std::wstring result(text);
     // Soft red (#FF8080), with the same reset used by the creature-name formatter.
-    if(result.rfind(L"[Voice error: ",0)==0 || result.rfind(L"[Model error: ",0)==0)
+    if(result.rfind(L"[Voice error: ",0)==0 || result.rfind(L"[Model error: ",0)==0
+            || result.rfind(L"[Voice input stopped: ",0)==0)
         return L"$C8421631 "+result+L"$C0 ";
+    if(result.rfind(L"[Voice input off.",0)==0 || result.rfind(L"[Voice input unavailable.",0)==0)
+        return L"$C8443903 "+result+L"$C0 ";
     const auto colon=result.find(L':');
     if(result.empty() || result[0]==L'[' || colon==std::wstring::npos || colon>48)return result;
     // Verified HelpText $C decimal BBGGRR command; $C0 restores the speaker
@@ -53,6 +56,10 @@ inline bool caption_owned(uintptr_t pointer) {
         if(pointer>=start && pointer<start+sizeof(buffer))return true;
     }
     return false;
+}
+
+inline uint64_t caption_duration(const wchar_t* text,bool notice) {
+    return notice?(std::wstring(text).rfind(L"[Voice input ",0)==0?6000:4000):10000;
 }
 
 inline bool caption_entry(uintptr_t address,const unsigned char* prefix,size_t size) {
@@ -121,7 +128,7 @@ inline void caption_tick(uint64_t epoch,uintptr_t creature,bool allowed,uint64_t
     buffer.fill(0);std::copy(formatted.begin(),formatted.end(),buffer.begin());
     using Append=void(__thiscall*)(void*,const wchar_t*,float,uint32_t);
     reinterpret_cast<Append>(0x5CCED0)(reinterpret_cast<void*>(text),buffer.data(),0.0f,0);
-    caption_visible_until=now+(caption_notice?4000:10000);
+    caption_visible_until=now+caption_duration(caption_pending.data(),caption_notice);
     ++caption_delivered;caption_queued=false;caption_status="submitted_to_game";
 }
 }

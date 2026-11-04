@@ -3,6 +3,11 @@
 Start with [usage](usage.md). Keep changes focused and describe the problem,
 resulting behavior and checks in your pull request.
 
+Agents configuring or troubleshooting an existing install should use
+[SKILL.md](../SKILL.md) and the [direct settings reference](agent-setup.md).
+That guide covers validated `settings.json` edits, applying them and locating
+the relevant diagnostics without dumping private settings or credentials.
+
 ## Development
 
 From PowerShell in the repository, create an environment and install dependencies:

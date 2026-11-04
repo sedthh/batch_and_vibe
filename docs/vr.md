@@ -42,8 +42,8 @@ controller-to-keyboard mapper can map a spare button to the selected shortcut:
 send key-down while held and key-up when released. F13-F24 provide additional
 binding targets. Choose a shortcut unused by the game and other applications;
 the mod does not suppress the game's keyboard input. Direct Oculus/Quest button
-binding is not supported. Remapping depends on the mapper and VR runtime and
-still needs headset testing; voice activation needs neither.
+binding is not supported. Remapping depends on the mapper and VR runtime;
+voice activation needs neither.
 
 From this repository, with every game instance closed:
 
@@ -107,11 +107,21 @@ pending text. Incoming text is restricted to plain BMP characters; unsupported
 emoji and engine commands are removed. Only the bridge's fixed name formatter
 adds the game's verified colour commands.
 
+At the first playable creature, a single voice-readiness notice explains whether
+voice is off, needs setup, or is ready. Push-to-talk readiness includes the configured
+key. Disabled/missing setup is yellow; microphone/transcription failures are red;
+readiness/recovery uses normal text colour. These notices last six seconds and
+wait for story dialogue. They do not repeat on save loads or ordinary listening
+cycles. Changed availability replaces a pending notice; Save & apply starts a
+fresh readiness check. Checks do not record, load a model or call an API. A muted
+but otherwise available microphone cannot be distinguished from ordinary silence.
+
 Completed transcriptions appear once as `[Heard: ...]`. Voice and model/API
-failures appear as `[Voice error: ...]` or `[Model error: ...]` in soft red,
+failures appear as `[Voice input stopped: ...]`, `[Voice error: ...]` (creature
+speech), or `[Model error: ...]` in soft red,
 then restore the game's normal text colour. Error messages use fixed descriptions,
 never raw provider responses or credentials. These notices wait until the current subtitle finishes and remain for
-four seconds. Long transcriptions are shortened only for display; the full text
+four seconds, except the six-second voice-readiness/failure notices. Long transcriptions are shortened only for display; the full text
 is still sent to chat. Repeated identical notices are suppressed for 30 seconds,
 and notices delayed more than 30 seconds are dropped. A persistent model error
 is announced once until it clears or changes, rather than on every thinking tick.
@@ -119,12 +129,14 @@ There are no live listening,
 transcribing, or sent-status subtitles, and no periodic subtitle refresh: the
 game clears and redraws text when it changes, which causes visible blinking.
 Fix microphone/provider errors and use **Save & apply** to restart voice input.
-Rebuild and install the updated bridge for error colours; earlier notice-capable
-bridges show the same errors in the normal subtitle colour.
+Rebuild and install the updated bridge for readiness colours and six-second timing;
+earlier notice-capable bridges show readiness text in normal colour for four seconds.
 
 Story dialogue and existing native help take priority. Captions may wait or be
-skipped while that interface is occupied. This experiment does not add a VR
-keyboard, speech synthesis, controller bindings, or a separate microphone panel.
+skipped while that interface is occupied. Optional [creature speech](speech.md)
+reads replies aloud in VR too; its microphone feedback protection can be disabled
+for headset use. This experiment does not add a VR keyboard, direct controller
+bindings, or a separate microphone panel.
 Voice input is the intended headset interaction. Notices are delayed or
 hidden while the game's dialogue owns the subtitles; they are not a mute indicator.
 
@@ -147,11 +159,12 @@ simulation, native packet acceptance, subtitle drawing in captured eye images,
 and expiry. It cannot establish headset comfort, subtitle depth/readability,
 OpenXR focus behavior, microphone quality, or controller usability.
 
-For a first test, use `--vr --dummy --no-actions` and **disable voice**
+For a first test, use `--vr --dummy --no-actions` and **disable voice and creature speech**
 to test automatic replies without microphone capture or provider calls.
 VR mode has no desktop text input, even without a headset.
 Then test voice deliberately with a local speech
-model or your configured API limits. `--dummy` replaces only the chat model.
+model or your configured API limits. `--dummy` replaces only the chat model;
+API transcription and creature speech can still incur charges.
 
 For a headset tester's PR review:
 
@@ -166,6 +179,5 @@ For a headset tester's PR review:
 - After chat-only checks, enable actions and test one harmless command. Report
   the visible effect separately from an accepted command.
 
-Do not describe headset compatibility as verified until someone has completed
-those checks on real hardware. Do not publish saves, captures of private chat,
+Do not publish saves, captures of private chat,
 settings, credentials, or game binaries with the PR.

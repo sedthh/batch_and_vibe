@@ -155,6 +155,7 @@ class OverlayModel:
     last_answer: str = ''
     creature_name: str | None = None
     last_message: str = ''
+    message_source: str | None = None
     message_time: float = -math.inf
     llm_active: bool = False
     call_count: int | None = None
@@ -179,7 +180,7 @@ class OverlayModel:
         self.creature_name=None
         self.thinking=False; self.last_answer=''
         self.wait_notice=''
-        self.last_message='';self.message_time=-math.inf;self.llm_active=False
+        self.last_message='';self.message_source=None;self.message_time=-math.inf;self.llm_active=False
         self.call_count=None;self.call_finished_until=-math.inf
         self.speech_expires=None; self.observed_at=-math.inf
         self.reason='Creature chat is unavailable'
@@ -235,7 +236,7 @@ class OverlayModel:
             if identity is None or obs.get('connected') is not True:
                 self.read_gap(); return
             if identity!=self.identity:
-                self.last_message='';self.message_time=-math.inf
+                self.last_message='';self.message_source=None;self.message_time=-math.inf
                 self.call_count=None;self.call_finished_until=-math.inf;self.llm_active=False
             self.identity=identity
             self.creature_name=ProfileNames(creature_name=
@@ -278,7 +279,7 @@ class OverlayModel:
             if 'last_message' in frame['speech']:
                 retained=frame['speech']['last_message']
                 if retained is None:
-                    self.last_message='';self.message_time=-math.inf
+                    self.last_message='';self.message_source=None;self.message_time=-math.inf
                 else:self.accept_message(retained)
             answer=frame['speech'].get('last_answer')
             self.last_answer=answer['text'] if answer else ''
@@ -310,12 +311,13 @@ class OverlayModel:
 
     def accept_message(self, message):
         text=message['text'];stamp=message['created_at']
+        source=message.get('source')
         if (not isinstance(text,str) or len(text)>3000 or type(stamp) not in (int,float)
-                or not math.isfinite(stamp)):
+                or not math.isfinite(stamp) or (source is not None and (not isinstance(source,str) or len(source)>64))):
             raise ValueError('Invalid persistent message')
         text=display_speech(text).strip()
         if text and stamp>=self.message_time:
-            self.last_message=text;self.message_time=stamp
+            self.last_message=text;self.message_time=stamp;self.message_source=source
 
     def banner_text(self, *, pending=False, notice='', now=None):
         now=time.monotonic() if now is None else now

@@ -21,6 +21,7 @@ class VrLauncherTests(unittest.TestCase):
         for vr in (False,True):
             window=StatusWindow.__new__(StatusWindow)
             window.root=Mock();window.game_controls=Mock();window.game_buttons=[]
+            window.service_indicators=Mock()
             window.stopping=False;window.restarting=False;window.write=Mock()
             window.load_display_size=Mock(return_value='800x600')
             launcher=Mock(vr_mode=vr,busy=False,installation_error=None,vr_installation_error=None)

@@ -26,6 +26,13 @@ int main() {
     assert(styled_caption(L"[Model error: Unavailable.]")==L"$C8421631 [Model error: Unavailable.]$C0 ");
     assert(styled_caption(L"[Voice: No speech recognized.]")==L"[Voice: No speech recognized.]");
     assert(styled_caption(L"Plain")==L"Plain");
+    assert(styled_caption(L"[Voice input off. Enable it.]")==L"$C8443903 [Voice input off. Enable it.]$C0 ");
+    assert(styled_caption(L"[Voice input unavailable. Choose a model.]")==L"$C8443903 [Voice input unavailable. Choose a model.]$C0 ");
+    assert(styled_caption(L"[Voice input stopped: Microphone unavailable.]")==L"$C8421631 [Voice input stopped: Microphone unavailable.]$C0 ");
+    assert(styled_caption(L"[Voice input ready. Hold F11 to speak.]")==L"[Voice input ready. Hold F11 to speak.]");
+    assert(caption_duration(L"[Voice input ready.]",true)==6000);
+    assert(caption_duration(L"[Heard: Hello.]",true)==4000);
+    assert(caption_duration(L"Creature: Hello.",false)==10000);
     std::array<wchar_t,caption_units> long_text;long_text.fill(L'x');
     assert(!valid_caption(long_text.data()));
     caption_buffers[0][0]=L'H';caption_buffers[0][1]=L'i';

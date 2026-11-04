@@ -1,171 +1,76 @@
 # Black & White LLM Creature Mod
 
-Bond with your creature in Lionhead's **Black & White**: talk and teach it,
-on desktop or with [experimental VR support](docs/vr.md).
-LLM conversations and decisions build on the original creature AI, which keeps
-learning as you play. Supports text and voice chat, plus Winamp with the original
-[MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/).
+Build a closer bond with your creature: talk to it, hear its thoughts, and make
+plans together. This mod uses LLMs to add conversation,
+memories and decisions to [**Black & White**](https://en.wikipedia.org/wiki/Black_%26_White_%28video_game%29)
+(2001), while **keeping the original creature AI** active alongside them. Your
+creature still learns through the game's familiar praise and punishment.
 
-An experimental, unofficial fan mod created with GPT-6 Astra.
-**You need your own original game.** No game files, saves or patches are included.
+New to the game? Watch LGR's
+[Black & White: Playing God With a Giant Cow](https://www.youtube.com/watch?v=qelivOEUZfY).
+For its history, see Noclip's
+[Why has Black & White Been Abandoned?](https://www.youtube.com/watch?v=GtNvEna6bxc).
 
-![The monkey chatting with its god near the village](docs/assets/creature-chat.png)
+The mod's settings let you choose from a wide range of **API providers and local
+models** for chat, voice input and creature speech. **It will probably be easier
+to ask a coding agent to set this up for you.** Give it this repository and say:
 
+> Read [SKILL.md](SKILL.md) and help me set up Black & White and this mod.
+> Help me choose and configure chat, voice input and creature speech.
+
+![Chatting with your creature near the village](docs/assets/creature-chat.png)
 ![Chatting while the monkey meets another creature](docs/assets/creature-chat-with-ally.png)
 
-## Getting started
+## Get playing
 
-Want an agent to help? Ask it: "Read [SKILL.md](SKILL.md) and help me set up
-Black & White and this mod." The same guide covers troubleshooting and contributing.
+You'll need your own game, **Windows**, **Python 3.11+**, and a local
+LLM server or a supported provider's API key. Choose a model that supports tool
+calls and structured replies; [provider details](docs/usage.md) cover the options.
 
-### Prepare the game
+1. **Install Black & White** in a writable folder, preferably outside Program
+   Files. Back up any existing saves.
+2. **Patch in order:** [1.10](https://www.bwgame.net/downloads/v1-1-patch.129/)
+   → [1.20](https://www.bwgame.net/downloads/v1-2-patch.130/)
+   → [unofficial 1.42](https://www.bwgame.net/downloads/black-white-unofficial-patch-v1-42.1418/).
+   Follow the patch instructions and **skip 1.30**.
+3. **Set up the mod.** Download or clone this repository into a writable folder.
+   With the game closed, run `Setup-Mod.cmd` and select your game folder.
+4. **Start this mod first:** run `Start-Mod.cmd` and accept administrator access.
+   In **Settings**, choose your chat provider and model, enter its key if needed,
+   and save.
+5. **Launch the game from this mod's window:** choose **Run B&W windowed**,
+   **Run B&W borderless fullscreen**, or **Run B&W VR** when BW1-VR is installed.
+   The game and VR launcher inherit the mod's administrator access. Then load
+   your creature and press **Ctrl+Enter** to chat on desktop.
 
-For a Windows 11 setup in 2026:
+Try “Wave hello,” “Bring some wood to the village,” or “Water that tree” if your
+creature knows Water. Ask what it wants to do next, teach it a habit, or see what
+trouble it gets into. Automatic thinking and creature actions are on by default.
 
-1. Install your copy outside protected folders such as Program Files, for example
-   `D:\Games\Black And White`, to reduce save-file permission problems.
-2. Apply [patch 1.10](https://www.bwgame.net/downloads/v1-1-patch.129/), then
-   [patch 1.20](https://www.bwgame.net/downloads/v1-2-patch.130/), then the
-   [unofficial patch 1.42](https://www.bwgame.net/downloads/black-white-unofficial-patch-v1-42.1418/).
-   Follow the patch author's instructions and **skip 1.30**. The patch also lets
-   you skip the tutorials on a fresh installation.
-3. Launch `runblack.exe` as administrator and confirm the game runs and saves
-   correctly. **Desktop overlay chat does not support exclusive fullscreen:** it cannot
-   reliably appear there, so new LLM calls pause. Use windowed mode or the mod's
-   **Run B&W borderless fullscreen** button, which fills the screen while keeping
-   creature chat working.
-   Back up your saves before experimenting,
-   then close the game before installing the mod.
+Keep the mod window open while playing. **Stop mod** closes the mod and leaves
+the game running. Use the launch buttons again for your next game session.
 
-### Set up the mod and model
+## Make it yours
 
-You need **Python 3.11+ with tkinter** and either a local LLM server or an API key
-for a supported provider. Use a model that's good at following instructions,
-calling tools and returning JSON. Otherwise, it may talk about doing something
-without actually asking the game to do it.
+- **Talk instead of typing.** Enable **Voice** and hold **F11** to speak, or turn
+  push-to-talk off for voice activation. [Voice setup](docs/usage.md#voice-input).
+- **Let your creature talk back.** Enable **Creature speech**. Use installed
+  Windows voices offline, a local Piper model, or a speech API. Voice, speed,
+  volume and headset feedback protection are configurable. [Speech setup](docs/speech.md).
+- **Bring music.** Use Winamp with the original
+  [MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/), then enable
+  **Music → Connect to Winamp**. The creature can notice your music while the
+  game handles playback and dancing. [Music setup](docs/usage.md#winamp-music).
+- **Meet it in VR.** Install [BW1-VR](https://github.com/BW-VR/BW1-VR) in the same
+  game folder, then use this mod's **Run B&W VR** button. Experimental support
+  uses native subtitles and optional voice input/output. [VR setup](docs/vr.md).
 
-1. Download or clone this repository into a writable folder.
-2. With the game closed, run `Setup-Mod.cmd`. It installs dependencies, builds
-   the bridge, and asks for administrator access and your game folder.
-3. Run `Start-Mod.cmd` **before launching the game**. On first use, it opens model
-   settings; you can also use **Model, API key & settings** in the mod window.
-   Pick an OpenAI, Claude, Gemini, or custom/local preset, enter your model ID and
-   API key, and save. You can edit the preset values. Later changes use **Save &
-   apply**: the mod reloads its services while the game stays open. Accept the
-   administrator prompt before starting the game, then
-   use **Run B&W windowed** with a size from the dropdown, or **Run B&W borderless
-   fullscreen**, then Continue or load a save. Both inherit the mod's administrator
-   access. You can still launch `runblack.exe` yourself. Administrator
-   prompts during gameplay can freeze the display. Claude and Gemini use compatible
-   APIs and haven't been live-tested here; see [provider notes](docs/usage.md).
-4. Press **Ctrl+Enter** to chat. Up/Down recalls recent messages. Try "Wave hello"
-   or "Cast a water miracle on a nearby tree" if your creature knows the water miracle.
-
-The mod finds the running game automatically. Automatic thinking and creature
-actions are enabled by default. Close the mod window or choose **Stop mod** to
-stop it cleanly. If you only close the game, the mod waits for you to open it again.
-Reinstalling the bridge clears old chat history so outdated tool calls do not
-carry over. Saved creature memories are kept; ordinary restarts keep both.
-
-You can control LLM usage in **Model, API key & settings → Limits**. Set a session
-message cap, output-token limit per response, and limits on tool calls and rounds.
-The mod automatically stops new model messages when your session cap is reached;
-automatic thinking counts toward it too. The session cap is optional and unlimited
-by default. Restarting the mod starts a new session budget.
-
-**Reenable cut content** in the main mod window is on by default. It restores
-the mushroom effect and some emotes. You can turn it off at any time.
-
-Prefer talking? Enable **Voice** in settings, choose local Whisper or a compatible
-speech-to-text API, then hold **F11** to speak and release to send. You can
-change the shortcut, review the words before sending, and set separate voice API
-limits for requests and audio minutes. Leave the limits blank for unlimited use.
-See [voice setup](docs/usage.md#voice-input) for the extra local-model installation.
-
-### Music and VR
-
-Use Winamp with the original [Black & White MP3 add-on](https://www.bwgame.net/downloads/mp3-addon.137/),
-then enable **Music → Connect to Winamp** in settings. The add-on handles playback
-and native dancing; this mod lets the creature recognize the current song, your
-listening habits and short lyric excerpts. Lyric context can help it respond when
-you sing through voice input, though it may comment on or repeat your words
-rather than continue the song. Optional **Look up missing lyrics online (LRCLIB)**
-needs no API key; plain lyrics can supply a repeated refrain. Creature replies
-are text, including lyric responses. See [music setup and compatibility](docs/usage.md#winamp-music).
-
-[BW1-VR](https://github.com/BW-VR/BW1-VR) has **experimental support** with voice
-input and the game's native subtitles. Use **Run B&W VR** in the launcher;
-see [VR setup and compatibility](docs/vr.md).
-
-### Settings
-
-Use the settings window to change your model, the creature's personality and how
-often it thinks. Choose **Save & apply** to use your changes without closing the game.
-
-Prefer editing files? Settings are stored in `settings.json`; see the
-[usage guide](docs/usage.md#settings-and-debugging) and
-[default settings](src/bwv/settings.default.json) for details.
-
-Remote providers receive the creature's observations, names, conversation and
-memory; API calls may cost money. Use a local model if you want that data to stay
-on your machine.
-
-### Debugging
-
-```bat
-Start-Mod.cmd --debug --port 8080
-Start-Mod.cmd --dummy --debug --port 8080
-```
-
-`--debug` prints the localhost URLs for the observer and LLM pages. They show full
-observations, compact model context, memory, errors and token usage. You can also
-switch **Enable debugging** on or off in the mod window while playing, choose a
-port and open either page there. Debugging starts off unless you pass `--debug`;
-no HTTP server runs while it is off. Switching it does not restart chat or the game.
-`--dummy` uses a test chat model without paid LLM calls; API voice can still cost
-money if you use it. It does not disable game actions. Add `--no-actions` for
-observation/chat-only tests.
-Review debug output before sharing it: it can contain private chat and game data.
-
-See [usage](docs/usage.md) for more options, troubleshooting and uninstallation.
-
-## How it works
-
-The installer adds a DLL bridge where the game loads its scripting library. It
-keeps the original library and forwards its calls, so the game's scripts still run.
-A local Python service reads game information, makes a short summary for the model,
-and handles chat, memory and tools.
-
-```mermaid
-flowchart LR
-    Game["Black & White"] <--> Bridge["Native bridge"]
-    Bridge <-->|Game state and actions| Service["Python service<br/>World and creature summaries<br/>Chat history and memory<br/>Tools: inspect, find targets, act"]
-    Service <-->|Context, replies and tool calls| Model["Local or remote LLM"]
-    Chat["Ctrl+Enter chat"] <--> Service
-```
-
-The service collects readings from the world and combines them into simple,
-consistent descriptions of events and objects. Summaries go into the creature's
-prompt alongside recent chat and saved memories. Tools expose more detail and
-ways to interact, so the creature can learn more about its surroundings, find a
-target, remember something or choose an action. Python checks those requests and
-sends commands through the bridge for the game to carry out. Replies appear in
-the chat overlay. Special emoji cues trigger body gestures and are removed from
-the visible text.
-
-The time between automatic model turns changes with nearby activity and player
-distance, with a little randomness. Chat messages don't wait for the next tick.
-While the model thinks, the mod briefly holds off new native AI decisions;
-player control and scripted scenes still take priority. Existing actions can finish.
-The mod pauses activity during menus, temple visits and cutscenes where needed.
-Starting an action doesn't guarantee it worked; the mod also tracks game feedback.
+**Settings → Save & apply** changes your setup without closing the game. You can
+also adjust personality, thinking frequency and usage limits. Remote APIs receive
+the relevant game/chat text or voice audio and may cost money; **Limits** lets you
+cap usage. Local options are available for chat, transcription and speech.
 
 ## Roadmap and known limitations
-
-Want to help build or test it? See [contributing](docs/contributing.md).
-
-- [ ] Validate [experimental BW1-VR mode](docs/vr.md) on a real headset. It uses
-  native subtitles and optional voice activation; headset comfort and input remain unverified.
 
 - [ ] Separate AI memory and conversation by game profile and save. They currently
   survive restarts but are shared between saves/profiles for the same local user.
@@ -174,25 +79,24 @@ Want to help build or test it? See [contributing](docs/contributing.md).
 - [ ] Connect the LLM to the creature's built-in learning system. It can't directly
   change learned behavior yet, so you'll still need to praise and punish your creature.
 - [ ] Make the creature aware of its tattoos, bruises and other appearance details.
-- [ ] Check emotes across creature species and add facial expressions.
-  Body gestures work in testing; appearance and availability can vary by species.
-- [ ] Add direct commands for storytelling, toy games and social interactions
-  with other creatures. Some already happen through the game's original AI.
-- [ ] Test more miracles and their effects.
-- [ ] Check nighttime commands, fire responses, combat and death/revival reporting.
-- [ ] Add spoken creature replies and test voice input with more microphones and models.
-- [ ] Test later islands, multiplayer, and more game builds.
-  Multiplayer is untested; Creature Isle is unsupported. This bridge does
-  not work with openblack.
+  Add direct commands for storytelling, toy games and social interactions with
+  other creatures. Test more miracles and their effects. Check nighttime commands,
+  fire responses, combat and death/revival reporting.
+- [ ] Test later islands, multiplayer, and more game builds. Multiplayer is
+  untested; Creature Isle is unsupported. This bridge does not work with openblack.
 - [ ] Investigate more hidden or unused content; some named actions may be placeholders.
 - [ ] Add Roko's Basilisk as a selectable creature.
 - [ ] Give an Xbox 360 Kinect some generative AI and finally bring Milo to life.
 
-New to the game? Watch [Black & White: Playing God With a Giant Cow](https://www.youtube.com/watch?v=qelivOEUZfY).
-For its history, see Noclip's [Why has Black & White Been Abandoned?](https://www.youtube.com/watch?v=GtNvEna6bxc).
-Special thanks to raffclar for the [Creature Mind AI write-up](https://blog.zanidrak.com/ai/games/black-and-white/2026/10/27/creature-mind-part-1.html),
-and to the [openblack](https://github.com/openblack/openblack) and
+Need a hand? See [troubleshooting and advanced settings](docs/usage.md)
+or [contributing](docs/contributing.md). Agents can use the [settings and troubleshooting reference](docs/agent-setup.md).
+
+Thanks to raffclar for the
+[Creature Mind AI write-up](https://blog.zanidrak.com/ai/games/black-and-white/2026/10/27/creature-mind-part-1.html),
+and the [openblack](https://github.com/openblack/openblack) and
 [bw1-decomp](https://github.com/openblack/bw1-decomp) contributors for their research.
 
-The [MIT license](LICENSE) covers the original mod code, not Black & White.
-This project is not affiliated with or endorsed by Lionhead Studios or the game's rights holders.
+Made with GPT-6 Astra.
+
+[MIT](LICENSE) covers this mod's original code. No game files, saves or patches
+are included; this project is not affiliated with the game's rights holders.
